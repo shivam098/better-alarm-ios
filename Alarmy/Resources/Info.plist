@@ -20,29 +20,18 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
-
-	<!-- AlarmKit. Without these two keys the app cannot schedule system alarms. -->
 	<key>NSAlarmKitUsageDescription</key>
 	<string>Alarmy needs permission to schedule alarms so they can ring through Silent Mode and Focus, and keep ringing until you have completed your wake-up mission.</string>
-
-	<!-- Declares that this app's alarms may interrupt an active call, which is
-	     what stops a call silently swallowing your alarm. -->
-	<key>NSSupportsAlarmInterruptions</key>
-	<true/>
-
 	<key>NSCameraUsageDescription</key>
 	<string>Used only while you are completing a camera mission, to count your squats or check the photo you took. Images are processed on your device and never uploaded.</string>
-
 	<key>NSMotionUsageDescription</key>
 	<string>Used only while a movement mission is running, to confirm you really shook the phone, walked, or did your squats.</string>
-
+	<key>NSSupportsAlarmInterruptions</key>
+	<true/>
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 	<key>NSSupportsLiveActivitiesFrequentUpdates</key>
 	<true/>
-
-	<key>UILaunchScreen</key>
-	<dict/>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>
@@ -52,6 +41,8 @@
 	<array>
 		<string>audio</string>
 	</array>
+	<key>UILaunchScreen</key>
+	<dict/>
 	<key>UIRequiredDeviceCapabilities</key>
 	<array>
 		<string>arm64</string>

@@ -1,21 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
-<dict>
-	<!-- The app, the widget extension and the App Intents all read the same
-	     alarm store, so they must share a container. -->
-	<key>com.apple.security.application-groups</key>
-	<array>
-		<string>group.com.alarmy.app</string>
-	</array>
-
-	<!--
-	  AlarmKit additionally requires an entitlement that Apple grants on request.
-	  Once your team has it, uncomment the line below and regenerate the project.
-	  Adding it before Apple has granted it will make code signing fail.
-
-	  <key>com.apple.developer.alarmkit</key>
-	  <true/>
-	-->
-</dict>
+<dict/>
 </plist>
