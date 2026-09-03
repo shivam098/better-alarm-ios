@@ -8,11 +8,13 @@ reach.
 
 Every mission is free. There is no paywall on waking up.
 
-> **Status: unbuilt.** This repository was authored without access to a Mac, so
-> nothing here has ever been through the Swift compiler. The pure-logic layer
-> (`AlarmyCore`) is fully unit-tested and `swift test` is expected to pass; the
-> UIKit/SwiftUI/AlarmKit layer is expected to need a small number of signature
-> fixes on the first build. See [First build](#first-build-what-to-expect).
+> **Build status.** `AlarmyCore` — the layer containing every rule that decides
+> whether you get out of bed — **compiles cleanly and passes all 108 tests**
+> (verified with Swift 6.3.3). Every file in the app layer parses without a
+> syntax error. What has *not* happened is a full Xcode build: the SwiftUI and
+> AlarmKit code has never been type-checked against the real iOS SDK, because it
+> was written without access to a Mac. See
+> [First build](#first-build-what-to-expect).
 
 ---
 
@@ -100,8 +102,8 @@ The five invariants the test suite enforces:
 
 ```bash
 # 1. Clone
-git clone https://github.com/shivam098/alarmy-ios.git
-cd alarmy-ios
+git clone https://github.com/shivam098/better-alarm-ios.git
+cd better-alarm-ios
 
 # 2. Install the project generator
 brew install xcodegen
@@ -131,6 +133,9 @@ cd AlarmyCore && swift test
 This is the most useful command in the repository and the one you should run
 before anything else. It needs **no Xcode project, no device, no simulator and
 no signing** — `AlarmyCore` is a plain Swift package.
+
+**Expected result: 108 tests, 0 failures.** This has been verified on Swift
+6.3.3.
 
 What it verifies:
 
@@ -235,34 +240,41 @@ treats Critical Alerts as a non-goal.
 
 ## First build: what to expect
 
-**Be honest with yourself about this section before you file a bug.** Every
-Swift file here was written without a compiler. The logic has been traced by
-hand and the tests were written against the real source, but no build has ever
-run.
+Be clear about what has and has not been proven, so you know where to look if
+something goes wrong.
 
-Expectations:
+**Verified:**
 
-- **`AlarmyCore` should compile and test cleanly.** It is plain Foundation
-  Swift with no platform APIs, and it is the part that was verified most
-  carefully.
-- **The app layer may need small fixes.** Most likely candidates, in order:
+- `AlarmyCore` compiles with no errors and no warnings, and its 108 tests all
+  pass. That is the layer that decides whether the alarm can be defeated, so the
+  part that matters most is demonstrated rather than asserted.
+- Every Swift file in the app and widget layers parses without a syntax error.
 
-  1. **`Alarmy/Scheduling/AlarmKitScheduler.swift`** — this is the only file
-     that imports AlarmKit and therefore the only place API drift can bite.
-     `AlarmPresentation.Alert`'s initialiser changed between iOS 26.0 and
-     26.1; the `makeAlert` function carries a comment marking the exact line to
-     adjust. If the build breaks, look here first.
-  2. **Strict-concurrency warnings.** `project.yml` deliberately sets
-     `SWIFT_VERSION: "5.0"`, so actor-isolation and `Sendable` complaints
-     arrive as warnings rather than errors. Do not switch to Swift 6 language
-     mode until the app builds and runs; you will be fixing two problems at once.
-  3. **Missing sound assets.** `Alarmy/Resources/Sounds/` is empty by design —
-     see [the note in that folder](Alarmy/Resources/Sounds/README.md). The
-     scheduler already falls back to the system default tone, so this is not
-     fatal.
+**Not verified:**
 
-If you hit something, the fix is almost always local. The architecture keeps
-platform APIs at the edges precisely so a compiler surprise cannot force a
+- The app layer has never been type-checked against the iOS SDK. Parsing proves
+  the syntax is valid; it does not prove that a SwiftUI modifier exists or that
+  an AlarmKit initialiser takes the arguments passed to it.
+
+So expect the first `xcodebuild` to surface some type-level fixes. In order of
+likelihood:
+
+1. **`Alarmy/Scheduling/AlarmKitScheduler.swift`** — the only file that imports
+   AlarmKit, and therefore the only place API drift can bite.
+   `AlarmPresentation.Alert`'s initialiser changed between iOS 26.0 and 26.1;
+   the `makeAlert` function carries a comment marking the exact line to adjust.
+   If the build breaks, look here first.
+2. **Strict-concurrency warnings.** `project.yml` deliberately sets
+   `SWIFT_VERSION: "5.0"`, so actor-isolation and `Sendable` complaints arrive
+   as warnings rather than errors. Do not switch to Swift 6 language mode until
+   the app builds and runs; you will be fixing two problems at once.
+3. **Missing sound assets.** `Alarmy/Resources/Sounds/` is empty by design —
+   see [the note in that folder](Alarmy/Resources/Sounds/README.md). The
+   scheduler already falls back to the system default tone, so this is not
+   fatal.
+
+Whatever turns up, the fix should be local. Platform APIs are deliberately kept
+at the edges of the architecture so that a compiler surprise cannot force a
 redesign.
 
 ---
@@ -270,7 +282,7 @@ redesign.
 ## Repository layout
 
 ```
-alarmy-ios/
+better-alarm-ios/
 ├── AlarmyCore/                  Pure Swift package — no Apple frameworks
 │   └── Sources/AlarmyCore/
 │       ├── Models/              Alarm, MissionConfig, Weekday, AlarmOccurrence
