@@ -1,0 +1,32 @@
+# Xcode
+*.xcodeproj/
+*.xcworkspace/
+!*.xcodeproj/project.pbxproj
+xcuserdata/
+DerivedData/
+build/
+*.xcuserstate
+*.xcscmblueprint
+
+# The Xcode project is generated from project.yml by XcodeGen.
+Alarmy.xcodeproj/
+
+# Swift Package Manager
+.build/
+.swiftpm/
+Packages/
+Package.resolved
+
+# macOS
+.DS_Store
+
+# Signing
+*.mobileprovision
+*.p12
+*.cer
+ExportOptions.plist
+
+# Editors
+.vscode/
+.idea/
+*.swp

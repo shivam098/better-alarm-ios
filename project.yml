@@ -1,0 +1,86 @@
+name: Alarmy
+
+options:
+  bundleIdPrefix: com.alarmy
+  createIntermediateGroups: true
+  deploymentTarget:
+    iOS: "26.0"
+  # AlarmKit is iOS 26+. There is no earlier fallback that can break through
+  # Silent Mode, and shipping an alarm that silently respects the mute switch
+  # would be worse than not shipping at all.
+
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    IPHONEOS_DEPLOYMENT_TARGET: "26.0"
+    MARKETING_VERSION: "1.0"
+    CURRENT_PROJECT_VERSION: "1"
+    DEVELOPMENT_TEAM: ""
+    CODE_SIGN_STYLE: Automatic
+    ENABLE_USER_SCRIPT_SANDBOXING: YES
+    SWIFT_EMIT_LOC_STRINGS: YES
+
+packages:
+  AlarmyCore:
+    path: AlarmyCore
+
+targets:
+
+  Alarmy:
+    type: application
+    platform: iOS
+    sources:
+      - path: Alarmy
+        excludes:
+          - "Resources/Info.plist"
+          - "Resources/*.entitlements"
+          - "Resources/Sounds/README.md"
+    dependencies:
+      - package: AlarmyCore
+        product: AlarmyCore
+      - target: AlarmyWidget
+        embed: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.alarmy.app
+        PRODUCT_NAME: Alarmy
+        INFOPLIST_FILE: Alarmy/Resources/Info.plist
+        CODE_SIGN_ENTITLEMENTS: Alarmy/Resources/Alarmy.entitlements
+        GENERATE_INFOPLIST_FILE: NO
+        TARGETED_DEVICE_FAMILY: "1"
+        SUPPORTS_MACCATALYST: NO
+
+  AlarmyWidget:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: AlarmyWidget
+        excludes:
+          - "Info.plist"
+          - "*.entitlements"
+      # The Live Activity is typed on `AlarmAttributes<AlarmyMetadata>`, so the
+      # extension must compile the same metadata type as the app. These two
+      # files are deliberately free of app-only dependencies.
+      - path: Alarmy/Scheduling/AlarmyMetadata.swift
+      - path: Alarmy/Scheduling/SystemAlarmScheduling.swift
+    dependencies:
+      - package: AlarmyCore
+        product: AlarmyCore
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.alarmy.app.widget
+        PRODUCT_NAME: AlarmyWidget
+        INFOPLIST_FILE: AlarmyWidget/Info.plist
+        CODE_SIGN_ENTITLEMENTS: AlarmyWidget/AlarmyWidget.entitlements
+        GENERATE_INFOPLIST_FILE: NO
+        SKIP_INSTALL: YES
+
+schemes:
+  Alarmy:
+    build:
+      targets:
+        Alarmy: all
+    run:
+      config: Debug
+    test:
+      config: Debug
