@@ -3,6 +3,7 @@ import SwiftUI
 import AppIntents
 import AlarmKit
 import AlarmyCore
+import ActivityKit
 
 // ============================================================================
 //  THE ONLY FILE IN THIS PROJECT THAT IMPORTS AlarmKit.
@@ -196,7 +197,7 @@ actor AlarmKitScheduler: SystemAlarmScheduling {
         )
     }
 
-    private func alertSound(for soundID: String) -> AlertConfiguration.AlertSound {
+    private func alertSound(for soundID: String) -> ActivityKit.AlertConfiguration.AlertSound {
         let sound = SoundLibrary.sound(for: soundID)
         // The repo ships without binary audio assets, so fall back rather than
         // scheduling an alarm that references a file the bundle does not have.

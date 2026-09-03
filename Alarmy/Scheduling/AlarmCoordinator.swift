@@ -278,9 +278,11 @@ final class AlarmCoordinator: ObservableObject {
         if session?.occurrenceKey == occurrenceKey { return }
 
         let rootKey = AlarmStore.rootKey(of: occurrenceKey)
-        guard let alarm = alarms.first(where: { rootKey.hasPrefix($0.id.uuidString) })
-            ?? (await store.allAlarms()).first(where: { rootKey.hasPrefix($0.id.uuidString) })
-        else {
+        var alarm = alarms.first(where: { rootKey.hasPrefix($0.id.uuidString) })
+        if alarm == nil {
+            alarm = await store.allAlarms().first(where: { rootKey.hasPrefix($0.id.uuidString) })
+        }
+        guard let alarm else {
             AlarmyLog.firing.error("Fired with no matching alarm: \(occurrenceKey, privacy: .public)")
             return
         }

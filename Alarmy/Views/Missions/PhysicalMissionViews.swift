@@ -125,7 +125,7 @@ struct StepsMissionView: View {
 
             Text(warning ?? "Only steps taken from now count.")
                 .font(.footnote)
-                .foregroundStyle(warning == nil ? .secondary : .orange)
+                .foregroundStyle(warning == nil ? .secondary : Color.orange)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal)
 
