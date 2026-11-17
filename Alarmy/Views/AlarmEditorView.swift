@@ -166,26 +166,27 @@ struct AlarmEditorView: View {
                         Text("\(limit) time\(limit == 1 ? "" : "s")").tag(Int?.some(limit))
                     }
 
-                    private var wakeCheckSection: some View {
-                        Section {
-                            Toggle("Check I'm still awake", isOn: wakeEnabled)
-                            if draft.wakeCheck?.isEnabled == true {
-                                Stepper("Check after \(draft.wakeCheck?.delayMinutes ?? 5) min",
-                                        value: wakeDelay, in: 1...30)
-                                Stepper("Respond within \(draft.wakeCheck?.responseMinutes ?? 1) min",
-                                        value: wakeResponse, in: 1...5)
-                            }
-                        } header: {
-                            Text("After dismissal")
-                        } footer: {
-                            Text("Separate from Mission Guard. After you finish, a system alarm asks if you're still awake. Confirm in the app; Stop alone does not confirm. A second alarm is scheduled in advance if you don't respond.")
-                        }
-                    }
                 }
 
                 Toggle("Each snooze gets shorter", isOn: $draft.snooze.escalating)
                 Toggle("Finish the mission before snoozing", isOn: $draft.snooze.costsMission)
             }
+        }
+    }
+
+    private var wakeCheckSection: some View {
+        Section {
+            Toggle("Check I'm still awake", isOn: wakeEnabled)
+            if draft.wakeCheck?.isEnabled == true {
+                Stepper("Check after \(draft.wakeCheck?.delayMinutes ?? 5) min",
+                        value: wakeDelay, in: 1...30)
+                Stepper("Respond within \(draft.wakeCheck?.responseMinutes ?? 1) min",
+                        value: wakeResponse, in: 1...5)
+            }
+        } header: {
+            Text("After dismissal")
+        } footer: {
+            Text("Separate from Mission Guard. After you finish, a system alarm asks if you're still awake. Confirm in the app; Stop alone does not confirm. A second alarm is scheduled in advance if you don't respond.")
         }
     }
 

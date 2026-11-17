@@ -177,39 +177,6 @@ private struct CombinationEditor: View {
                 mission.children.remove(atOffsets: offsets)
             }
 
-            struct MissionConfigurationFields: View {
-                @Binding var config: MissionConfig
-                @State private var registering = false
-
-                var body: some View {
-                    Stepper("Repetitions: \(config.targetCount)", value: $config.targetCount,
-                            in: MissionConfig.targetRange(for: config.type))
-                    if config.type == .typing {
-                        TextField("Custom sentences (one per line)", text: sentences, axis: .vertical)
-                            .lineLimit(3...6)
-                        Text("Leave blank for built-in phrases. Sentences stay on this device.")
-                            .font(.caption).foregroundStyle(.secondary)
-                    }
-                    if config.type == .photo || config.type == .qr {
-                        Button(config.referenceAssetIDs.isEmpty ? "Register a target" : "Replace registered target") {
-                            registering = true
-                        }
-                        Text(config.referenceAssetIDs.isEmpty ? "A target is required before saving." : "Target registered on this device.")
-                            .font(.caption).foregroundStyle(.secondary)
-                            .sheet(isPresented: $registering) {
-                                TargetRegistrationView(type: config.type) { identifier in
-                                    config.referenceAssetIDs = [identifier]
-                                }
-                            }
-                    }
-                }
-
-                private var sentences: Binding<String> {
-                    Binding(get: { (config.customSentences ?? []).joined(separator: "\n") },
-                            set: { config.customSentences = $0.components(separatedBy: .newlines) })
-                }
-            }
-
             if mission.children.count < 5 {
                 Button {
                     mission.children.append(MissionConfig(type: .math))
@@ -231,6 +198,39 @@ private struct CombinationEditor: View {
                 mission.children[index] = MissionConfig(type: newType, difficulty: mission.difficulty)
             }
         )
+    }
+}
+
+struct MissionConfigurationFields: View {
+    @Binding var config: MissionConfig
+    @State private var registering = false
+
+    var body: some View {
+        Stepper("Repetitions: \(config.targetCount)", value: $config.targetCount,
+                in: MissionConfig.targetRange(for: config.type))
+        if config.type == .typing {
+            TextField("Custom sentences (one per line)", text: sentences, axis: .vertical)
+                .lineLimit(3...6)
+            Text("Leave blank for built-in phrases. Sentences stay on this device.")
+                .font(.caption).foregroundStyle(.secondary)
+        }
+        if config.type == .photo || config.type == .qr {
+            Button(config.referenceAssetIDs.isEmpty ? "Register a target" : "Replace registered target") {
+                registering = true
+            }
+            Text(config.referenceAssetIDs.isEmpty ? "A target is required before saving." : "Target registered on this device.")
+                .font(.caption).foregroundStyle(.secondary)
+                .sheet(isPresented: $registering) {
+                    TargetRegistrationView(type: config.type) { identifier in
+                        config.referenceAssetIDs = [identifier]
+                    }
+                }
+        }
+    }
+
+    private var sentences: Binding<String> {
+        Binding(get: { (config.customSentences ?? []).joined(separator: "\n") },
+                set: { config.customSentences = $0.components(separatedBy: .newlines) })
     }
 }
 

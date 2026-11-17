@@ -187,15 +187,16 @@ struct MissionRunnerView: View {
             Task { await coordinator.completeMission() }
         }
 
-        private func useFallback() {
-            guard let step = currentStep else { return }
-            fallback = MissionConfig(type: session.alarm.resolvedFallback(excluding: Set(MissionPermission.allPermissions)),
-                                     difficulty: step.difficulty)
-            Task { await coordinator.noteFallback(from: step.type, to: fallback?.type ?? .math) }
-        }
     }
 
     // MARK: - Snooze
+
+    private func useFallback() {
+        guard let step = currentStep else { return }
+        fallback = MissionConfig(type: session.alarm.resolvedFallback(excluding: Set(MissionPermission.allPermissions)),
+                                 difficulty: step.difficulty)
+        Task { await coordinator.noteFallback(from: step.type, to: fallback?.type ?? .math) }
+    }
 
     private var canSnooze: Bool {
         !session.occurrenceKey.contains("#wd") && !session.occurrenceKey.contains("#wake-")
