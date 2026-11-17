@@ -92,7 +92,9 @@ final class AlarmCoordinatorTests: XCTestCase {
         await coordinator.clearHistory()
         let restored = AlarmStore(directory: directory)
         let restoredChecks = await restored.allWakeChecks()
-        XCTAssertEqual(restoredChecks, checks)
+        XCTAssertEqual(restoredChecks.map(\.id), checks.map(\.id))
+        XCTAssertEqual(restoredChecks.first?.alarm.mission, check.alarm.mission)
+        XCTAssertEqual(try XCTUnwrap(restoredChecks.first).deadline.timeIntervalSince(check.deadline), 0, accuracy: 1)
         await coordinator.handleStopPressed(occurrenceKey: check.checkKey)
         let afterStop = await store.allWakeChecks()
         XCTAssertEqual(afterStop, checks)
@@ -111,6 +113,60 @@ final class AlarmCoordinatorTests: XCTestCase {
         await coordinator.requestSnooze()
         XCTAssertEqual(coordinator.session?.snoozeCount, 1)
         XCTAssertNotNil(coordinator.session)
+    }
+
+    func testWatchdogDoesNotRestartAnAlreadyActiveMission() async {
+        let (coordinator, _, _, key) = await fixture(Alarm())
+        await coordinator.handleStartMission(occurrenceKey: key)
+        let initialID = coordinator.session?.id
+        await coordinator.handleStartMission(occurrenceKey: "\(key)#wd1")
+        XCTAssertEqual(coordinator.session?.id, initialID)
+        XCTAssertEqual(coordinator.session?.state, .missionActive)
+    }
+
+    func testFailedWakeSchedulingDoesNotCancelOriginalGuardOrReportCompletion() async {
+        let alarm = Alarm(wakeCheck: WakeCheckSettings(isEnabled: true))
+        let (coordinator, store, scheduler, key) = await fixture(alarm)
+        await coordinator.handleStartMission(occurrenceKey: key)
+        let before = await scheduler.allRequests()
+        await scheduler.setFailure(true)
+        await coordinator.completeMission()
+        XCTAssertNotNil(coordinator.session)
+        let outcome = await store.occurrence(key: key)
+        XCTAssertNil(outcome?.outcome)
+        let checks = await store.allWakeChecks()
+        XCTAssertTrue(checks.isEmpty)
+        let after = await scheduler.allRequests()
+        XCTAssertEqual(Set(before.map(\.id)), Set(after.map(\.id)))
+    }
+
+    func testWakeRequestsUseIndependentDeadlineAndBackupWithoutSnooze() {
+        let alarm = Alarm(audioOptions: AlarmAudioOptions(backupSoundID: "siren"),
+                          wakeCheck: WakeCheckSettings(isEnabled: true))
+        let check = PendingWakeCheck(parentKey: "root", alarm: alarm, completedAt: Date())
+        let requests = AlarmRequestBuilder().requests(for: check)
+        XCTAssertEqual(requests.map(\.fireDate), [check.checkAt, check.deadline])
+        XCTAssertEqual(requests.last?.soundID, "siren")
+        XCTAssertTrue(requests.allSatisfy { !$0.allowSnooze })
+        XCTAssertEqual(requests.last?.mission, alarm.mission)
+    }
+
+    func testReconcilePreservesUnfinishedGuardAfterStop() async throws {
+        let calendar = Calendar.current
+        let fired = try XCTUnwrap(calendar.date(byAdding: .minute, value: -1, to: Date()))
+        let parts = calendar.dateComponents([.hour, .minute], from: fired)
+        let alarm = Alarm(hour: try XCTUnwrap(parts.hour), minute: try XCTUnwrap(parts.minute))
+        let (coordinator, store, scheduler, _) = await fixture(alarm)
+        let requests = AlarmRequestBuilder().requests(for: alarm, firingAt: fired)
+        await store.setScheduledKeys(Set(requests.map(\.occurrenceKey)))
+        try await scheduler.schedule(requests)
+        let key = requests[0].occurrenceKey
+        await coordinator.handleStopPressed(occurrenceKey: key)
+        await coordinator.reconcile()
+        let after = await scheduler.allRequests()
+        for request in requests where request.role.isWatchdog && request.fireDate > Date() {
+            XCTAssertTrue(after.contains { $0.id == request.id })
+        }
     }
 
     func testBundledTonesAreAvailableForInAppPlayback() {

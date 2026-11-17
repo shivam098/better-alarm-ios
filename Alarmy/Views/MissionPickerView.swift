@@ -238,6 +238,3 @@ extension MissionCategory {
     static var ordered: [MissionCategory] { [.none, .mental, .visual, .physical, .location, .mixed] }
 }
 
-extension MissionType: Identifiable {
-    public var id: String { rawValue }
-}

@@ -155,7 +155,22 @@ final class AlarmCoordinator: ObservableObject {
         guard authorization == .authorized else { return }
 
         let pendingChecks = await store.allWakeChecks()
-        let pendingSnoozes = await store.allSnoozes()
+        let allSnoozes = await store.allSnoozes()
+        let pendingSnoozes = allSnoozes.filter { pending in
+            pending.parentKey == session?.rootKey
+                || builder.snoozeRequests(for: pending.alarm, parentKey: pending.parentKey,
+                                          round: pending.round, firingAt: pending.fireDate)
+                    .contains { $0.fireDate > now }
+        }
+        if pendingSnoozes.count != allSnoozes.count {
+            do {
+                try await store.setSnoozes(pendingSnoozes)
+            } catch {
+                banner = "Couldn't update pending snoozes: \(error.localizedDescription)"
+                AlarmyLog.persistence.error("Snooze cleanup failed: \(error.localizedDescription)")
+                return
+            }
+        }
         let dynamic = pendingChecks.flatMap { builder.requests(for: $0) }
             + pendingSnoozes.flatMap {
                 builder.snoozeRequests(for: $0.alarm, parentKey: $0.parentKey, round: $0.round, firingAt: $0.fireDate)
@@ -171,7 +186,7 @@ final class AlarmCoordinator: ObservableObject {
         )
         let wishlist = Array(wishlistByKey.values)
         let affordable = builder.withinBudget(
-            wishlist, now: now, capacity: max(0, schedulingCapacity - dynamic.count)
+            wishlist, now: now, capacity: max(0, schedulingCapacity - dynamic.filter { $0.fireDate > now }.count)
         )
 
         // Preserve any live guard chain: it belongs to a firing already in
@@ -384,6 +399,11 @@ final class AlarmCoordinator: ObservableObject {
         if await store.occurrence(key: occurrenceKey)?.outcome == .completed { return }
 
         let rootKey = AlarmStore.rootKey(of: occurrenceKey)
+        if let current = session, current.rootKey == rootKey, current.state.isActive,
+           occurrenceKey.contains("#wd") {
+            await scheduler.stopRinging(id: SystemAlarmRequest.identifier(for: occurrenceKey))
+            return
+        }
         let check = await store.allWakeChecks().first { $0.parentKey == rootKey }
         let snooze = await store.allSnoozes().first { $0.parentKey == rootKey }
         var alarm = check?.alarm ?? snooze?.alarm ?? alarms.first(where: { rootKey.hasPrefix($0.id.uuidString) })

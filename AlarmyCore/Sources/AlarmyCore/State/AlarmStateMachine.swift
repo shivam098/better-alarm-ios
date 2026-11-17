@@ -254,10 +254,10 @@ public enum SnoozePolicy {
     /// Round is encoded in system keys as well as history so relaunching cannot
     /// reset a limit, even if the user has cleared history.
     public static func count(in occurrenceKey: String) -> Int {
-        occurrenceKey.split(separator: "#").compactMap { component in
+        max(0, occurrenceKey.split(separator: "#").compactMap { component in
             guard component.hasPrefix("snooze") else { return nil }
             return Int(component.dropFirst("snooze".count))
-        }.max() ?? 0
+        }.max() ?? 0)
     }
 
     public static func canSnooze(
@@ -276,7 +276,7 @@ public enum SnoozePolicy {
         guard settings.escalating else { return settings.duration }
         let base = settings.duration
         let ladder = [base, max(1, base * 5 / 9), max(1, base * 3 / 9)]
-        return ladder[min(snoozeCount, ladder.count - 1)]
+        return ladder[min(max(0, snoozeCount), ladder.count - 1)]
     }
 
     public static func remaining(settings: SnoozeSettings, snoozeCount: Int) -> Int? {

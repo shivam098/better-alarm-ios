@@ -234,7 +234,7 @@ final class PhotoTargetStore: ObservableObject {
 
     /// Salted hash of a scanned payload. The salt is generated once per install,
     /// so identical codes on two devices do not produce the same identifier.
-    nonisolated static func hash(_ payload: String) -> String {
+    static func hash(_ payload: String) -> String {
         let defaults = UserDefaults(suiteName: AlarmStore.appGroupID) ?? .standard
         let salt: String
         if let existing = defaults.string(forKey: saltKey) {

@@ -4,7 +4,7 @@ import Foundation
 
 /// The full mission library. Every case is available to every user for free
 /// (PRD MON-1 … MON-5): there is no premium tier and no locked mission.
-public enum MissionType: String, Codable, Hashable, CaseIterable, Sendable {
+public enum MissionType: String, Codable, Hashable, CaseIterable, Identifiable, Sendable {
     case none
     case math
     case missingSymbol
@@ -16,6 +16,8 @@ public enum MissionType: String, Codable, Hashable, CaseIterable, Sendable {
     case photo
     case qr
     case combination
+
+    public var id: String { rawValue }
 
     public var displayName: String {
         switch self {

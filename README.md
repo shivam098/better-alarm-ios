@@ -334,8 +334,8 @@ product work, not repaired existing flows. Recording would require an explicit
 privacy/product decision before adding microphone access. Last-minute edit
 protection is also not implemented; editing remains unrestricted.
 
-All eleven are free. Each has three difficulty levels and a configurable number
-of rounds.
+All ten missions are free, with five difficulty levels and mission-specific
+repetition ranges. Slide-to-stop is available without a mission.
 
 | Mission | Type | Needs |
 | --- | --- | --- |
@@ -348,8 +348,7 @@ of rounds.
 | Squats | Physical | Camera |
 | Photo | Physical | Camera |
 | Barcode | Physical | Camera |
-| Hold still | Physical | Motion sensors |
-| Wake-up check | Timed | — |
+| Combination | Mixed | Depends on the saved steps |
 
 The mission picker shows each mission's difficulty and the permissions it needs
 *before* you select it, so nobody discovers at 06:00 that their chosen mission
@@ -383,6 +382,10 @@ Testing an alarm app is inherently awkward. Some practical advice:
 - **Test an incoming call.** Have someone call you a minute before the alarm.
   The alarm must still arrive.
 - **Reboot the phone** with an alarm pending, and confirm it still fires.
+- **Test the post-dismissal check separately.** Enable it, complete a mission,
+  then force-quit the app. Stop the check alarm without confirming in-app and
+  verify the already-scheduled re-alarm arrives. Repeat and confirm "I'm awake"
+  within the response window; the re-alarm should be cancelled.
 - Watch the logs with Console.app or:
 
   ```bash

@@ -93,7 +93,7 @@ actor AlarmKitScheduler: SystemAlarmScheduling {
     }
 
     func stopRinging(id: UUID) async {
-        try? await manager.stop(id: id)
+        try? manager.stop(id: id)
     }
 
     func pendingIdentifiers() async -> Set<UUID> {
@@ -133,18 +133,14 @@ actor AlarmKitScheduler: SystemAlarmScheduling {
 
         // All snoozes go through the coordinator so limits, shortening and
         // mission-before-snooze cannot be bypassed by the system countdown.
-        let usesBuiltInCountdown = false
-
         let attributes = AlarmAttributes<AlarmyMetadata>(
-            presentation: AlarmPresentation(alert: makeAlert(for: request, countdown: usesBuiltInCountdown)),
+            presentation: AlarmPresentation(alert: makeAlert(for: request)),
             metadata: AlarmyMetadata(request: request),
             tintColor: tintColor
         )
 
         return AlarmManager.AlarmConfiguration(
-            countdownDuration: usesBuiltInCountdown
-                ? Alarm.CountdownDuration(preAlert: nil, postAlert: TimeInterval(request.snoozeMinutes * 60))
-                : nil,
+            countdownDuration: nil,
             schedule: .fixed(request.fireDate),
             attributes: attributes,
             // Stop runs OUR code. This is what makes it possible to record a
@@ -162,8 +158,7 @@ actor AlarmKitScheduler: SystemAlarmScheduling {
     /// initializer. If the build fails on this call, that is the cause — adjust
     /// the argument list here and nowhere else.
     private func makeAlert(
-        for request: SystemAlarmRequest,
-        countdown: Bool
+        for request: SystemAlarmRequest
     ) -> AlarmPresentation.Alert {
 
         let stopButton = AlarmButton(
@@ -171,20 +166,6 @@ actor AlarmKitScheduler: SystemAlarmScheduling {
             textColor: .white,
             systemImageName: "stop.circle"
         )
-
-        if countdown {
-            // No mission: AlarmKit's own countdown is the snooze.
-            return AlarmPresentation.Alert(
-                title: LocalizedStringResource(stringLiteral: request.title),
-                stopButton: stopButton,
-                secondaryButton: AlarmButton(
-                    text: "Snooze",
-                    textColor: .white,
-                    systemImageName: "zzz"
-                ),
-                secondaryButtonBehavior: .countdown
-            )
-        }
 
         // With a mission, the prominent action opens the app and starts it.
         return AlarmPresentation.Alert(
