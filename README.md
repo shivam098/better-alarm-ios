@@ -8,13 +8,11 @@ reach.
 
 Every mission is free. There is no paywall on waking up.
 
-> **Build status.** `AlarmyCore` — the layer containing every rule that decides
-> whether you get out of bed — **compiles cleanly and passes all 108 tests**
-> (verified with Swift 6.3.3). Every file in the app layer parses without a
-> syntax error. What has *not* happened is a full Xcode build: the SwiftUI and
-> AlarmKit code has never been type-checked against the real iOS SDK, because it
-> was written without access to a Mac. See
-> [First build](#first-build-what-to-expect).
+> **Validation.** Run the core suite with `swift test` in `AlarmyCore`.
+> CI also builds the app against the iOS SDK and runs coordinator regression
+> tests on a simulator without signing. A green simulator run does not verify
+> real AlarmKit delivery, audio routing, permissions, camera or motion hardware.
+> Those still require an iPhone and the device checklist below.
 
 ---
 
@@ -134,8 +132,9 @@ This is the most useful command in the repository and the one you should run
 before anything else. It needs **no Xcode project, no device, no simulator and
 no signing** — `AlarmyCore` is a plain Swift package.
 
-**Expected result: 108 tests, 0 failures.** This has been verified on Swift
-6.3.3.
+The suite includes backward-compatible decoding, saved combination/custom
+typing configuration, snooze rounds and the independent wake-check deadline.
+Coordinator integration tests run through the `Alarmy` Xcode scheme on iOS.
 
 What it verifies:
 
@@ -149,8 +148,8 @@ What it verifies:
 | `AntiCheatTests` | Shaking detection rejects mechanical/periodic motion; step counting rejects pre-banked steps; squat counting rejects partial reps and bouncing. |
 | `StatisticsTests` | Streaks, grace days, and wake-time aggregates. |
 
-If this suite passes, the part of the app that determines whether you actually
-get out of bed is correct. The rest is presentation.
+Core tests check the rules; coordinator tests check scheduling and persistence.
+Neither substitutes for a signed, physical-device alarm test.
 
 ---
 
@@ -243,21 +242,10 @@ treats Critical Alerts as a non-goal.
 Be clear about what has and has not been proven, so you know where to look if
 something goes wrong.
 
-**Verified:**
-
-- `AlarmyCore` compiles with no errors and no warnings, and its 108 tests all
-  pass. That is the layer that decides whether the alarm can be defeated, so the
-  part that matters most is demonstrated rather than asserted.
-- Every Swift file in the app and widget layers parses without a syntax error.
-
-**Not verified:**
-
-- The app layer has never been type-checked against the iOS SDK. Parsing proves
-  the syntax is valid; it does not prove that a SwiftUI modifier exists or that
-  an AlarmKit initialiser takes the arguments passed to it.
-
-So expect the first `xcodebuild` to surface some type-level fixes. In order of
-likelihood:
+Consult the CI run for your exact revision for core and iOS SDK results.
+Local Windows checks cannot type-check SwiftUI or AlarmKit.
+Unsigned simulator validation does not establish signed-device delivery.
+When preparing a device build, check:
 
 1. **`Alarmy/Scheduling/AlarmKitScheduler.swift`** — the only file that imports
    AlarmKit, and therefore the only place API drift can bite.
@@ -268,10 +256,9 @@ likelihood:
    `SWIFT_VERSION: "5.0"`, so actor-isolation and `Sendable` complaints arrive
    as warnings rather than errors. Do not switch to Swift 6 language mode until
    the app builds and runs; you will be fixing two problems at once.
-3. **Missing sound assets.** `Alarmy/Resources/Sounds/` is empty by design —
-   see [the note in that folder](Alarmy/Resources/Sounds/README.md). The
-   scheduler already falls back to the system default tone, so this is not
-   fatal.
+3. **Sound resources.** Seven original synthesized WAV files are bundled.
+   See [the sound notes](Alarmy/Resources/Sounds/README.md) for regeneration
+   and platform limits.
 
 Whatever turns up, the fix should be local. Platform APIs are deliberately kept
 at the edges of the architecture so that a compiler surprise cannot force a
@@ -316,6 +303,36 @@ Two files are worth reading before the rest:
 ---
 
 ## The missions
+
+Photo and code targets can be registered in mission setup, including each
+combination step. Only a Vision feature print or salted payload hash is saved.
+Combination practice uses the saved steps, targets, repetitions and difficulty.
+Typing missions support per-alarm custom sentences (one per line). Missing
+targets and unavailable sensors offer a working, sensor-free backup mission.
+
+Snooze limits and shortening survive relaunch and history clearing. Choose
+"Complete mission to snooze" before solving to earn a snooze instead of
+dismissing the alarm; ordinary mission completion still dismisses it.
+
+### Post-dismissal wake check and sound controls
+
+"Check I'm still awake" is opt-in and separate from Mission Guard. On mission
+completion, the app persists a snapshot and schedules both a check alarm and a
+later re-alarm before cancelling the mission chain. Confirm "I'm awake" in the
+app during the response window to cancel the re-alarm. System Stop is not a
+confirmation. Pending checks survive relaunch and history clearing; deleting
+the alarm cancels its pending checks. As with all iOS alarms, system Stop
+cannot be removed, and no unlimited background execution is promised.
+
+Choose a backup tone for guard/re-alarm delivery. Spoken label/time, ramp
+duration, app volume and vibration apply to the in-app mission, not to the
+system alarm UI, whose volume/vibration/routing iOS controls.
+
+Overnight sleep/snore recording, AI object hunt, speech/rhythm missions, habits,
+custom backgrounds and sleep analysis are **not implemented**. They are separate
+product work, not repaired existing flows. Recording would require an explicit
+privacy/product decision before adding microphone access. Last-minute edit
+protection is also not implemented; editing remains unrestricted.
 
 All eleven are free. Each has three difficulty levels and a configurable number
 of rounds.

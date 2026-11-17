@@ -55,7 +55,7 @@ public enum MissionType: String, Codable, Hashable, CaseIterable, Sendable {
         case .steps:
             return [.motionFitness]
         case .squat:
-            return [.camera, .motion]
+            return [.camera]
         case .photo, .qr:
             return [.camera]
         case .combination:
@@ -124,6 +124,8 @@ public enum MissionPermission: String, Codable, Hashable, Sendable {
     case motion
     case motionFitness
 
+    public static let allPermissions: [MissionPermission] = [.camera, .motion, .motionFitness]
+
     public var displayName: String {
         switch self {
         case .camera: return "Camera"
@@ -186,19 +188,22 @@ public struct MissionConfig: Codable, Hashable, Sendable {
     /// Identifiers of locally stored reference assets (photo targets, registered QR payload hashes).
     public var referenceAssetIDs: [String]
     public var children: [MissionConfig]
+    public var customSentences: [String]?
 
     public init(
         type: MissionType = .math,
         difficulty: MissionDifficulty = .medium,
         targetCount: Int? = nil,
         referenceAssetIDs: [String] = [],
-        children: [MissionConfig] = []
+        children: [MissionConfig] = [],
+        customSentences: [String]? = nil
     ) {
         self.type = type
         self.difficulty = difficulty
         self.targetCount = targetCount ?? MissionConfig.defaultTargetCount(for: type)
         self.referenceAssetIDs = referenceAssetIDs
         self.children = children
+        self.customSentences = customSentences
     }
 
     public static let `default` = MissionConfig(type: .math, difficulty: .medium, targetCount: 3)
@@ -263,7 +268,25 @@ public struct MissionConfig: Codable, Hashable, Sendable {
         var copy = self
         let range = MissionConfig.targetRange(for: type)
         copy.targetCount = Swift.min(Swift.max(targetCount, range.lowerBound), range.upperBound)
-        if copy.type != .combination { copy.children = [] }
+        if copy.type == .combination {
+            copy.children = Array(children.flatMap(\.steps).filter { $0.type != .none }.prefix(5))
+            while copy.children.count < 2 { copy.children.append(.default) }
+            copy.children = copy.children.map { $0.normalized() }
+            copy.targetCount = copy.children.count
+        } else {
+            copy.children = []
+        }
+        copy.customSentences = customSentences?.map {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines)
+        }.filter { !$0.isEmpty }
         return copy
+    }
+
+    public var steps: [MissionConfig] {
+        type == .combination ? children.flatMap(\.steps) : [self]
+    }
+
+    public var needsTarget: Bool {
+        steps.contains { ($0.type == .photo || $0.type == .qr) && $0.referenceAssetIDs.isEmpty }
     }
 }

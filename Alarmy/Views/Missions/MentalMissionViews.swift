@@ -311,6 +311,7 @@ struct TypingMissionView: View {
         var rng = SeededGenerator(seed: UInt64(Date().timeIntervalSince1970 * 1000) ^ UInt64(solvedCount &+ 29))
         let generated = TypingPhraseProvider.generate(
             difficulty: config.difficulty,
+            customSentences: config.customSentences ?? [],
             excluding: challenges.activeSignatures,
             using: &rng
         )

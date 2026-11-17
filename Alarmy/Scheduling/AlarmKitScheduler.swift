@@ -65,6 +65,7 @@ actor AlarmKitScheduler: SystemAlarmScheduling {
             throw SystemAlarmError.notAuthorized
         }
 
+        var failures: [String] = []
         for request in requests where request.fireDate > Date() {
             do {
                 _ = try await manager.schedule(
@@ -77,11 +78,10 @@ actor AlarmKitScheduler: SystemAlarmScheduling {
                 AlarmyLog.scheduling.error(
                     "Failed to schedule \(request.occurrenceKey): \(error.localizedDescription)"
                 )
-                if case .primary = request.role {
-                    throw SystemAlarmError.schedulingFailed(error.localizedDescription)
-                }
+                failures.append("\(request.title): \(error.localizedDescription)")
             }
         }
+        if !failures.isEmpty { throw SystemAlarmError.schedulingFailed(failures.joined(separator: "; ")) }
     }
 
     func cancel(ids: [UUID]) async {
@@ -131,7 +131,9 @@ actor AlarmKitScheduler: SystemAlarmScheduling {
         for request: SystemAlarmRequest
     ) -> AlarmManager.AlarmConfiguration<AlarmyMetadata> {
 
-        let usesBuiltInCountdown = request.mission.type == .none && request.allowSnooze
+        // All snoozes go through the coordinator so limits, shortening and
+        // mission-before-snooze cannot be bypassed by the system countdown.
+        let usesBuiltInCountdown = false
 
         let attributes = AlarmAttributes<AlarmyMetadata>(
             presentation: AlarmPresentation(alert: makeAlert(for: request, countdown: usesBuiltInCountdown)),
@@ -199,8 +201,6 @@ actor AlarmKitScheduler: SystemAlarmScheduling {
 
     private func alertSound(for soundID: String) -> ActivityKit.AlertConfiguration.AlertSound {
         let sound = SoundLibrary.sound(for: soundID)
-        // The repo ships without binary audio assets, so fall back rather than
-        // scheduling an alarm that references a file the bundle does not have.
         let stem = (sound.fileName as NSString).deletingPathExtension
         let ext = (sound.fileName as NSString).pathExtension
         guard Bundle.main.url(forResource: stem, withExtension: ext) != nil else {

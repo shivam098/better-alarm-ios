@@ -1,30 +1,18 @@
 # Alarm sounds
 
-This folder is intentionally empty of audio.
+Seven original synthesized tones are committed here as four-second, mono,
+16-bit PCM WAV files at 22,050 Hz. No third-party recordings are used.
+The stable sound IDs in saved alarms have not changed.
 
-The app references a small library of alarm tones by filename (see
-`SoundLibrary` in `AlarmyCore`), but no `.caf` files are committed here. Audio
-assets are large, and shipping someone else's alarm tones in a public repository
-is a licensing problem waiting to happen.
+Regenerate deterministically with `node tools/generate-sounds.mjs`, then run
+`make project` on a Mac so XcodeGen includes the resources.
 
-**Nothing breaks without them.** `AlarmKitScheduler` falls back to
-`AlertConfiguration.AlertSound.default` whenever a named sound is missing, so
-the app builds and alarms ring using the system tone.
+AlarmKit uses the selected tone, with the system default as a missing-file
+fallback. Mission Guard and wake-check re-alarms use the configured backup
+tone. In-app playback tries the requested tone, backup, then Radar; if all fail
+it reports the error and attempts a repeating system alert.
 
-## Adding your own
-
-1. Obtain or record audio you have the right to use.
-2. Convert it to Core Audio Format. AlarmKit and the system alert sound path
-   both want a `.caf` file, and it must be **30 seconds or shorter**:
-
-   ```bash
-   afconvert -f caff -d LEI16@44100 input.wav output.caf
-   ```
-
-3. Drop the `.caf` files in this folder using the exact filenames listed in
-   `SoundLibrary`.
-4. Run `make project` so XcodeGen picks up the new resources.
-
-A good alarm tone starts quiet and escalates. A tone that opens at full volume
-teaches people to hate their phone; one that ramps gives a light sleeper a
-chance to wake gently and a heavy sleeper no way out.
+The configurable ramp, spoken label/time, app volume and vibration apply to
+in-app mission playback only. iOS controls system alarm volume, vibration and
+accessory routing. These controls do not override the hardware volume, phone
+calls, a powered-off phone or missing alarm authorization.

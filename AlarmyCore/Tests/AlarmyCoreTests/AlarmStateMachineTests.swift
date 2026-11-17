@@ -5,6 +5,29 @@ import XCTest
 /// fail, the app is lying to its users about waking them up.
 final class AlarmStateMachineTests: XCTestCase {
 
+    func testMissionRequestedForSnoozeSchedulesSnoozeRatherThanCompleting() {
+        let context = AlarmStateContext(
+            snooze: SnoozeSettings(costsMission: true), snoozeCount: 1,
+            missionSatisfied: true, snoozeAfterMission: true
+        )
+        let result = AlarmStateMachine.reduce(state: .missionActive, event: .missionCompleted, context: context)
+        XCTAssertEqual(result.state, .snoozed)
+        XCTAssertTrue(result.effects.contains(.scheduleSnooze(minutes: 9)))
+        XCTAssertFalse(result.effects.contains(.cancelWatchdogChain))
+        XCTAssertFalse(result.effects.contains(.recordOutcome(.completed)))
+        XCTAssertLessThan(result.effects.firstIndex(of: .scheduleSnooze(minutes: 9))!,
+                          result.effects.firstIndex(of: .stopAudio)!)
+    }
+
+    func testSnoozeRoundSurvivesWatchdogKeyAndEnforcesLimitAndShortening() {
+        let count = SnoozePolicy.count(in: "alarm-date#snooze2#wd3")
+        let settings = SnoozeSettings(duration: 9, limit: 2, escalating: true)
+        XCTAssertEqual(count, 2)
+        XCTAssertEqual(SnoozePolicy.duration(for: settings, snoozeCount: count), 3)
+        XCTAssertFalse(SnoozePolicy.canSnooze(settings: settings, snoozeCount: count, missionSatisfied: true))
+        XCTAssertEqual(SnoozePolicy.count(in: "alarm-date#wd1"), 0)
+    }
+
     private func context(
         missionType: MissionType = .math,
         snooze: SnoozeSettings = .default,

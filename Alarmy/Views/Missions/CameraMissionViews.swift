@@ -15,6 +15,7 @@ struct PhotoMissionView: View {
     let config: MissionConfig
     let onSolved: () -> Void
     let onFailed: (MissionFailure) -> Void
+    let onFallback: () -> Void
 
     @StateObject private var targets = PhotoTargetStore()
     @State private var camera = CameraSession()
@@ -34,7 +35,7 @@ struct PhotoMissionView: View {
                 } description: {
                     Text("Register a place in the alarm's settings before using this mission.")
                 } actions: {
-                    Button("Use a backup mission") { onFailed(.notRecognised("a saved target")) }
+                    Button("Use a backup mission", action: onFallback)
                         .buttonStyle(.borderedProminent)
                 }
             } else {
@@ -106,12 +107,14 @@ struct CodeMissionView: View {
     let config: MissionConfig
     let onSolved: () -> Void
     let onFailed: (MissionFailure) -> Void
+    let onFallback: () -> Void
 
     @StateObject private var targets = PhotoTargetStore()
     @State private var camera = CameraSession()
     @State private var message = "Point the camera at your registered code"
     @State private var scanned = 0
     @State private var lastRejectedAt = Date.distantPast
+    @State private var codeWasRemoved = true
 
     var body: some View {
         VStack(spacing: 16) {
@@ -123,7 +126,7 @@ struct CodeMissionView: View {
                 } description: {
                     Text("Register a QR code or barcode in the alarm's settings before using this mission.")
                 } actions: {
-                    Button("Use a backup mission") { onFailed(.notRecognised("a registered code")) }
+                    Button("Use a backup mission", action: onFallback)
                         .buttonStyle(.borderedProminent)
                 }
             } else {
@@ -158,10 +161,11 @@ struct CodeMissionView: View {
 
         camera.start(onCode: { payload in
             Task { @MainActor in handle(payload) }
-        })
+        }, onNoCode: { codeWasRemoved = true })
     }
 
     private func handle(_ payload: String) {
+        guard scanned < max(1, config.targetCount), codeWasRemoved else { return }
         let hash = PhotoTargetStore.hash(payload)
         guard config.referenceAssetIDs.contains(hash) else {
             // Rate-limited so sweeping past the wrong code does not spam failures.
@@ -173,7 +177,8 @@ struct CodeMissionView: View {
         }
 
         scanned += 1
-        message = "Scanned."
+        codeWasRemoved = false
+        message = "Scanned. Move the code out of view before scanning again."
         if scanned >= max(1, config.targetCount) {
             camera.stop()
             onSolved()
@@ -216,10 +221,84 @@ final class PhotoTargetStore: ObservableObject {
     }
 
     @discardableResult
-    func store(_ data: Data, identifier: String = UUID().uuidString) -> String {
-        try? data.write(to: directory.appendingPathComponent(identifier), options: .atomic)
+    func store(_ data: Data, identifier: String = UUID().uuidString) throws -> String {
+        try data.write(to: directory.appendingPathComponent(identifier), options: .atomic)
         refresh()
         return identifier
+    }
+
+    struct TargetRegistrationView: View {
+        let type: MissionType
+        let onRegistered: (String) -> Void
+        @Environment(\.dismiss) private var dismiss
+        @StateObject private var targets = PhotoTargetStore()
+        @State private var camera = CameraSession()
+        @State private var frame: CVPixelBuffer?
+        @State private var message: String?
+        @State private var finished = false
+
+        var body: some View {
+            NavigationStack {
+                MissionPermissionGate(permissions: [.camera], onFallback: { dismiss() }) {
+                    VStack(spacing: 16) {
+                        Text(type == .photo ? "Choose a place away from bed and photograph it." : "Scan a code placed away from bed.")
+                        CameraPreview(session: camera.captureSession)
+                            .clipShape(RoundedRectangle(cornerRadius: 16))
+                        if let message { Text(message).foregroundStyle(.orange) }
+                        if type == .photo {
+                            Button("Save photo target", action: savePhoto)
+                                .buttonStyle(.borderedProminent)
+                                .disabled(frame == nil)
+                        }
+                        Text("Only an on-device feature print or salted code hash is stored, not the image or raw code.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    .padding()
+                    .onAppear(perform: start)
+                    .onDisappear { camera.stop() }
+                }
+                .padding()
+                .navigationTitle("Register target")
+                .toolbar { Button("Cancel") { dismiss() } }
+            }
+        }
+
+        private func start() {
+            do {
+                try camera.configure(position: .back, scanCodes: type == .qr)
+                camera.start(onFrame: { frame = $0 }, onCode: { payload in
+                    guard !finished else { return }
+                    finish(PhotoTargetStore.hash(payload))
+                })
+            } catch {
+                message = "Camera unavailable. Close this screen and check camera access in Settings."
+            }
+        }
+
+        private func savePhoto() {
+            guard !finished, let frame, let image = CameraSession.cgImage(from: frame),
+                  let data = PhotoVerifier().referenceData(for: image) else {
+                message = "Couldn't register this frame. Try again with more light."
+                return
+            }
+            let result = PhotoVerifier().verify(candidate: image, against: data)
+            guard result.isMatch else {
+                message = result.failure?.userMessage ?? "Choose a clearer target."
+                return
+            }
+            do {
+                finish(try targets.store(data))
+            } catch {
+                message = "Couldn't save the target: \(error.localizedDescription)"
+            }
+        }
+
+        private func finish(_ identifier: String) {
+            finished = true
+            camera.stop()
+            onRegistered(identifier)
+            dismiss()
+        }
     }
 
     func delete(_ identifier: String) {

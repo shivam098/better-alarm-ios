@@ -50,6 +50,19 @@ targets:
         TARGETED_DEVICE_FAMILY: "1"
         SUPPORTS_MACCATALYST: NO
 
+  AlarmyTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: AlarmyTests
+    dependencies:
+      - target: Alarmy
+      - package: AlarmyCore
+        product: AlarmyCore
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+
   AlarmyWidget:
     type: app-extension
     platform: iOS
@@ -84,3 +97,5 @@ schemes:
       config: Debug
     test:
       config: Debug
+      targets:
+        - AlarmyTests

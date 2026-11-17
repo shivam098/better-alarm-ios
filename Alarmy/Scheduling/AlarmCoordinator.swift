@@ -11,6 +11,7 @@ struct RingingSession: Identifiable, Equatable {
     var state: AlarmState
     var snoozeCount: Int
     var missionSatisfied: Bool
+    var snoozeAfterMission = false
     var startedAt: Date
     var substitutedFrom: MissionType?
     var lastMessage: String?
@@ -22,7 +23,8 @@ struct RingingSession: Identifiable, Equatable {
             snooze: alarm.snooze,
             snoozeCount: snoozeCount,
             missionType: mission.type,
-            missionSatisfied: missionSatisfied
+            missionSatisfied: missionSatisfied,
+            snoozeAfterMission: snoozeAfterMission
         )
     }
 }
@@ -51,6 +53,7 @@ final class AlarmCoordinator: ObservableObject {
     private let builder: AlarmRequestBuilder
     private let permissions: PermissionManager
     private var eventTask: Task<Void, Never>?
+    private var completingMission = false
 
     /// Conservative cap on simultaneously-pending system alarms. AlarmKit does
     /// not document a limit, so the app stays well inside any plausible one and
@@ -116,6 +119,13 @@ final class AlarmCoordinator: ObservableObject {
     }
 
     func delete(_ alarm: Alarm) async {
+        do {
+            try await store.setWakeChecks(await store.allWakeChecks().filter { $0.alarm.id != alarm.id })
+            try await store.setSnoozes(await store.allSnoozes().filter { $0.alarm.id != alarm.id })
+        } catch {
+            banner = "Couldn't delete this alarm safely: \(error.localizedDescription)"
+            return
+        }
         await store.delete(id: alarm.id)
         await reload()
         await reconcile()
@@ -144,8 +154,25 @@ final class AlarmCoordinator: ObservableObject {
     func reconcile(now: Date = Date()) async {
         guard authorization == .authorized else { return }
 
-        let wishlist = alarms.flatMap { builder.requests(for: $0, from: now) }
-        let affordable = builder.withinBudget(wishlist, now: now, capacity: schedulingCapacity)
+        let pendingChecks = await store.allWakeChecks()
+        let pendingSnoozes = await store.allSnoozes()
+        let dynamic = pendingChecks.flatMap { builder.requests(for: $0) }
+            + pendingSnoozes.flatMap {
+                builder.snoozeRequests(for: $0.alarm, parentKey: $0.parentKey, round: $0.round, firingAt: $0.fireDate)
+            }
+        let previousKeys = await store.scheduledOccurrenceKeys()
+        let unfinishedGuards = alarms.flatMap { alarm in
+            builder.requests(for: alarm, from: now.addingTimeInterval(-TimeInterval(max(60, alarm.missionGuard.windowMinutes) * 60)))
+                .filter { $0.fireDate > now && previousKeys.contains($0.occurrenceKey) }
+        }
+        let wishlistByKey = Dictionary(
+            (alarms.flatMap { builder.requests(for: $0, from: now) } + unfinishedGuards)
+                .map { ($0.occurrenceKey, $0) }, uniquingKeysWith: { first, _ in first }
+        )
+        let wishlist = Array(wishlistByKey.values)
+        let affordable = builder.withinBudget(
+            wishlist, now: now, capacity: max(0, schedulingCapacity - dynamic.count)
+        )
 
         // Preserve any live guard chain: it belongs to a firing already in
         // flight and is not represented in the wish-list.
@@ -154,14 +181,13 @@ final class AlarmCoordinator: ObservableObject {
             liveChainKeys = Set(await store.keysInChain(parentKey: session.rootKey))
         }
 
-        let desiredKeys = Set(affordable.map(\.occurrenceKey)).union(liveChainKeys)
-        let previousKeys = await store.scheduledOccurrenceKeys()
+        let desiredKeys = Set((affordable + dynamic).map(\.occurrenceKey)).union(liveChainKeys)
 
         let staleIDs = previousKeys.subtracting(desiredKeys).map(SystemAlarmRequest.identifier(for:))
         await scheduler.cancel(ids: staleIDs)
 
         do {
-            try await scheduler.schedule(affordable)
+            try await scheduler.schedule(affordable + dynamic)
             await store.setScheduledKeys(desiredKeys)
             if wishlist.count > affordable.count {
                 AlarmyLog.scheduling.notice(
@@ -169,8 +195,14 @@ final class AlarmCoordinator: ObservableObject {
                 )
             }
         } catch {
+            // A batch can partially succeed. Track every possible identifier
+            // so deletion and the next reconciliation can still cancel it.
+            await store.setScheduledKeys(desiredKeys.union(previousKeys))
             banner = (error as? LocalizedError)?.errorDescription ?? "Some alarms couldn't be scheduled."
             AlarmyLog.scheduling.error("Reconcile failed: \(error.localizedDescription)")
+        }
+        if session == nil, let due = pendingChecks.first(where: { $0.checkAt <= now }) {
+            await beginSession(occurrenceKey: now < due.deadline ? due.checkKey : due.reAlarmKey)
         }
     }
 
@@ -187,7 +219,7 @@ final class AlarmCoordinator: ObservableObject {
     /// Called by `StartMissionIntent` when the user taps the secondary button.
     func handleStartMission(occurrenceKey: String) async {
         await beginSession(occurrenceKey: occurrenceKey)
-        guard var current = session else { return }
+        guard var current = session, current.occurrenceKey == occurrenceKey else { return }
         let transition = AlarmStateMachine.reduce(
             state: current.state, event: .startMission, context: current.context
         )
@@ -201,7 +233,22 @@ final class AlarmCoordinator: ObservableObject {
     /// `dismissedUnverified`, and the Mission Guard chain stays armed.
     func handleStopPressed(occurrenceKey: String) async {
         await beginSession(occurrenceKey: occurrenceKey)
-        guard var current = session else { return }
+        guard var current = session, current.occurrenceKey == occurrenceKey else { return }
+        if occurrenceKey.contains("#wake-") {
+            await scheduler.stopRinging(id: current.id)
+            current.state = .dismissedUnverified
+            await store.updateOccurrence(key: occurrenceKey) {
+                $0.outcome = .dismissedUnverified
+                $0.resolvedAt = Date()
+            }
+            session = nil
+            await reload()
+            return
+        }
+        if current.mission.type == .none {
+            await completeMission()
+            return
+        }
 
         let transition = AlarmStateMachine.reduce(
             state: current.state, event: .stopPressed, context: current.context
@@ -215,17 +262,53 @@ final class AlarmCoordinator: ObservableObject {
     }
 
     func completeMission() async {
-        guard var current = session else { return }
+        guard !completingMission, var current = session else { return }
+        completingMission = true
+        defer { completingMission = false }
         current.missionSatisfied = true
+        session = current
 
         let transition = AlarmStateMachine.reduce(
             state: current.state, event: .missionCompleted, context: current.context
         )
-        current.state = transition.state
-        session = current
-        await apply(transition.effects, for: current)
+        if transition.state == .snoozed { current.snoozeCount += 1 }
+        if transition.state == .completed {
+            do {
+                if current.occurrenceKey.contains("#wake-") {
+                    if current.occurrenceKey.hasSuffix("#wake-check"),
+                       let check = await store.allWakeChecks().first(where: { $0.parentKey == current.rootKey }),
+                       Date() >= check.deadline {
+                        await beginSession(occurrenceKey: check.reAlarmKey)
+                        return
+                    }
+                    try await store.setWakeChecks(await store.allWakeChecks().filter { $0.parentKey != current.rootKey })
+                } else if current.alarm.wakeCheck?.isEnabled == true {
+                    let check = PendingWakeCheck(parentKey: current.rootKey, alarm: current.alarm, completedAt: Date())
+                    let requests = builder.requests(for: check)
+                    do {
+                        try await scheduler.schedule(requests)
+                        var checks = await store.allWakeChecks().filter { $0.parentKey != current.rootKey }
+                        checks.append(check)
+                        try await store.setWakeChecks(checks)
+                    } catch {
+                        await scheduler.cancel(ids: requests.map(\.id))
+                        throw error
+                    }
+                }
+                try await store.setSnoozes(await store.allSnoozes().filter { $0.parentKey != current.rootKey })
+                if !current.alarm.isRepeating, !current.occurrenceKey.contains("#wake-") {
+                    var disabled = current.alarm
+                    disabled.isEnabled = false
+                    await store.upsert(disabled)
+                }
+            } catch {
+                banner = "Couldn't finish safely: \(error.localizedDescription). Please try again."
+                return
+            }
+        }
+        guard await apply(transition.effects, for: current) else { return }
 
-        session = nil
+        if session?.id == current.id { session = nil }
         await reload()
         await reconcile()
     }
@@ -243,8 +326,30 @@ final class AlarmCoordinator: ObservableObject {
         await apply(transition.effects, for: current)
     }
 
+    func noteFallback(from original: MissionType, to replacement: MissionType) async {
+        guard var current = session else { return }
+        current.lastMessage = "Switched from \(original.displayName) to \(replacement.displayName)."
+        session = current
+        await store.updateOccurrence(key: current.occurrenceKey) {
+            $0.substitutedFrom = original
+            $0.failureReasons.append("Fallback: \(original.rawValue) to \(replacement.rawValue)")
+        }
+    }
+
     func requestSnooze() async {
         guard var current = session else { return }
+        guard !current.occurrenceKey.contains("#wd"), !current.occurrenceKey.contains("#wake-") else {
+            banner = "Snooze isn't available for a follow-up alarm."
+            return
+        }
+        if current.alarm.snooze.costsMission && !current.missionSatisfied,
+           SnoozePolicy.canSnooze(settings: current.alarm.snooze, snoozeCount: current.snoozeCount, missionSatisfied: true) {
+            current.snoozeAfterMission = true
+            current.state = .missionActive
+            current.lastMessage = "Finish this mission to earn your snooze."
+            session = current
+            return
+        }
         let transition = AlarmStateMachine.reduce(
             state: current.state, event: .snoozeRequested, context: current.context
         )
@@ -252,9 +357,9 @@ final class AlarmCoordinator: ObservableObject {
         if transition.state == .snoozed {
             current.snoozeCount += 1
         }
+        guard await apply(transition.effects, for: current) else { return }
         current.state = transition.state
         session = current
-        await apply(transition.effects, for: current)
 
         if transition.state == .snoozed {
             session = nil
@@ -276,9 +381,12 @@ final class AlarmCoordinator: ObservableObject {
 
     private func beginSession(occurrenceKey: String) async {
         if session?.occurrenceKey == occurrenceKey { return }
+        if await store.occurrence(key: occurrenceKey)?.outcome == .completed { return }
 
         let rootKey = AlarmStore.rootKey(of: occurrenceKey)
-        var alarm = alarms.first(where: { rootKey.hasPrefix($0.id.uuidString) })
+        let check = await store.allWakeChecks().first { $0.parentKey == rootKey }
+        let snooze = await store.allSnoozes().first { $0.parentKey == rootKey }
+        var alarm = check?.alarm ?? snooze?.alarm ?? alarms.first(where: { rootKey.hasPrefix($0.id.uuidString) })
         if alarm == nil {
             alarm = await store.allAlarms().first(where: { rootKey.hasPrefix($0.id.uuidString) })
         }
@@ -289,14 +397,15 @@ final class AlarmCoordinator: ObservableObject {
 
         // Escalate if this is a watchdog, and substitute the mission if a
         // permission it needs has since been revoked (PRD PRM-5).
-        var mission = alarm.mission
+        var mission = alarm.mission.normalized()
+        if occurrenceKey.hasSuffix("#wake-check") { mission = MissionConfig(type: .none) }
         if occurrenceKey.contains("#wd"), alarm.missionGuard.escalates {
             mission = mission.escalated()
         }
 
         var substitutedFrom: MissionType?
         deniedPermissions = await permissions.deniedPermissions()
-        if !mission.requiredPermissions.isDisjoint(with: deniedPermissions) {
+        if mission.type != .combination && !mission.requiredPermissions.isDisjoint(with: deniedPermissions) {
             substitutedFrom = mission.type
             let fallback = alarm.resolvedFallback(excluding: deniedPermissions)
             mission = MissionConfig(type: fallback, difficulty: mission.difficulty)
@@ -304,13 +413,16 @@ final class AlarmCoordinator: ObservableObject {
         }
 
         let scheduledAt = Date()
-        let occurrence = AlarmOccurrence(
+        let previous = await store.occurrence(key: occurrenceKey)
+        let count = max(SnoozePolicy.count(in: occurrenceKey), previous?.snoozeCount ?? 0)
+        let occurrence = previous ?? AlarmOccurrence(
             alarmID: alarm.id,
             occurrenceKey: occurrenceKey,
             scheduledAt: scheduledAt,
             firedAt: scheduledAt,
             missionType: mission.type,
             difficulty: mission.difficulty,
+            snoozeCount: count,
             substitutedFrom: substitutedFrom
         )
         // Written before the UI updates, so a crash cannot lose the record.
@@ -322,9 +434,9 @@ final class AlarmCoordinator: ObservableObject {
             alarm: alarm,
             mission: mission,
             state: .ringing,
-            snoozeCount: 0,
+            snoozeCount: count,
             missionSatisfied: false,
-            startedAt: scheduledAt,
+            startedAt: previous?.firedAt ?? scheduledAt,
             substitutedFrom: substitutedFrom
         )
         await reload()
@@ -332,13 +444,15 @@ final class AlarmCoordinator: ObservableObject {
 
     // MARK: - Effects
 
-    private func apply(_ effects: [AlarmEffect], for session: RingingSession) async {
+    @discardableResult
+    private func apply(_ effects: [AlarmEffect], for session: RingingSession) async -> Bool {
         for effect in effects {
             switch effect {
 
             case .cancelWatchdogChain:
                 // Only ever reached from `.missionCompleted`.
                 let keys = await store.keysInChain(parentKey: session.rootKey)
+                    .filter { !$0.contains("#wake-") || session.occurrenceKey.contains("#wake-") }
                 await scheduler.cancel(ids: keys.map(SystemAlarmRequest.identifier(for:)))
                 var remaining = await store.scheduledOccurrenceKeys()
                 remaining.subtract(keys)
@@ -353,7 +467,7 @@ final class AlarmCoordinator: ObservableObject {
                 break // Handled as part of `.scheduleSnooze`.
 
             case .scheduleSnooze(let minutes):
-                await scheduleSnooze(minutes: minutes, for: session)
+                guard await scheduleSnooze(minutes: minutes, for: session) else { return false }
 
             case .recordOutcome(let outcome):
                 let elapsed = Int(Date().timeIntervalSince(session.startedAt) * 1000)
@@ -389,26 +503,43 @@ final class AlarmCoordinator: ObservableObject {
                 break
             }
         }
+        return true
     }
 
-    private func scheduleSnooze(minutes: Int, for session: RingingSession) async {
+    private func scheduleSnooze(minutes: Int, for session: RingingSession) async -> Bool {
+        let round = SnoozePolicy.count(in: session.occurrenceKey) + 1
         let fireDate = Date().addingTimeInterval(TimeInterval(minutes * 60))
         let requests = builder.snoozeRequests(
             for: session.alarm,
             parentKey: session.rootKey,
-            round: session.snoozeCount,
+            round: round,
             firingAt: fireDate
         )
 
         do {
             try await scheduler.schedule(requests)
+            do {
+                var pending = await store.allSnoozes().filter { $0.parentKey != session.rootKey }
+                pending.append(PendingSnooze(alarm: session.alarm, parentKey: session.rootKey, round: round, fireDate: fireDate))
+                try await store.setSnoozes(pending)
+            } catch {
+                await scheduler.cancel(ids: requests.map(\.id))
+                await scheduler.cancel(ids: requests.map(\.id))
+                throw error
+            }
+            let oldKeys = await store.keysInChain(parentKey: session.rootKey)
+                .filter { !requests.map(\.occurrenceKey).contains($0) }
+            await scheduler.cancel(ids: oldKeys.map(SystemAlarmRequest.identifier(for:)))
             var keys = await store.scheduledOccurrenceKeys()
+            keys.subtract(oldKeys)
             keys.formUnion(requests.map(\.occurrenceKey))
             await store.setScheduledKeys(keys)
             banner = "Snoozed for \(minutes) minutes."
+            return true
         } catch {
-            banner = "Snooze failed — the alarm will ring again shortly."
+            banner = "Snooze failed. Your alarm is still active; try again or finish the mission."
             AlarmyLog.scheduling.error("Snooze scheduling failed: \(error.localizedDescription)")
+            return false
         }
     }
 

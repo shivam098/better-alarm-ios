@@ -12,7 +12,7 @@ struct MissionPickerView: View {
     @Environment(\.dismiss) private var dismiss
 
     @Binding var mission: MissionConfig
-    @State private var previewing: MissionType?
+    @State private var previewing = false
 
     var body: some View {
         NavigationStack {
@@ -45,11 +45,15 @@ struct MissionPickerView: View {
 
                 if mission.type == .combination {
                     CombinationEditor(mission: $mission)
+                } else if mission.type != .none {
+                    Section("Mission setup") {
+                        MissionConfigurationFields(config: $mission)
+                    }
                 }
 
                 Section {
                     Button {
-                        previewing = mission.type
+                        previewing = true
                     } label: {
                         Label("Try it now", systemImage: "play.circle")
                     }
@@ -67,14 +71,16 @@ struct MissionPickerView: View {
                     Button("Done") { dismiss() }
                 }
             }
-            .sheet(item: $previewing) { type in
-                MissionPreviewView(config: MissionConfig(type: type, difficulty: mission.difficulty))
+            .sheet(isPresented: $previewing) {
+                MissionPreviewView(config: mission.normalized())
             }
         }
     }
 
     private func select(_ type: MissionType) {
+        guard mission.type != type else { return }
         mission.type = type
+        mission.referenceAssetIDs = []
         mission.targetCount = MissionConfig.defaultTargetCount(for: type)
         if type != .combination { mission.children = [] }
         if type == .combination && mission.children.isEmpty {
@@ -152,14 +158,56 @@ private struct CombinationEditor: View {
     var body: some View {
         Section {
             ForEach(Array(mission.children.enumerated()), id: \.offset) { index, child in
-                Picker("Step \(index + 1)", selection: binding(for: index)) {
-                    ForEach(MissionLibrary.all.filter { $0.type != .none && $0.type != .combination }) { option in
-                        Text(option.displayName).tag(option.type)
+                VStack(alignment: .leading) {
+                    Picker("Step \(index + 1)", selection: binding(for: index)) {
+                        ForEach(MissionLibrary.all.filter { $0.type != .none && $0.type != .combination }) { option in
+                            Text(option.displayName).tag(option.type)
+                        }
                     }
+                    Picker("Difficulty", selection: $mission.children[index].difficulty) {
+                        ForEach(MissionDifficulty.allCases, id: \.self) { level in
+                            Text(level.displayName).tag(level)
+                        }
+                    }
+                    MissionConfigurationFields(config: $mission.children[index])
                 }
+                .deleteDisabled(mission.children.count <= 2)
             }
             .onDelete { offsets in
                 mission.children.remove(atOffsets: offsets)
+            }
+
+            struct MissionConfigurationFields: View {
+                @Binding var config: MissionConfig
+                @State private var registering = false
+
+                var body: some View {
+                    Stepper("Repetitions: \(config.targetCount)", value: $config.targetCount,
+                            in: MissionConfig.targetRange(for: config.type))
+                    if config.type == .typing {
+                        TextField("Custom sentences (one per line)", text: sentences, axis: .vertical)
+                            .lineLimit(3...6)
+                        Text("Leave blank for built-in phrases. Sentences stay on this device.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                    if config.type == .photo || config.type == .qr {
+                        Button(config.referenceAssetIDs.isEmpty ? "Register a target" : "Replace registered target") {
+                            registering = true
+                        }
+                        Text(config.referenceAssetIDs.isEmpty ? "A target is required before saving." : "Target registered on this device.")
+                            .font(.caption).foregroundStyle(.secondary)
+                            .sheet(isPresented: $registering) {
+                                TargetRegistrationView(type: config.type) { identifier in
+                                    config.referenceAssetIDs = [identifier]
+                                }
+                            }
+                    }
+                }
+
+                private var sentences: Binding<String> {
+                    Binding(get: { (config.customSentences ?? []).joined(separator: "\n") },
+                            set: { config.customSentences = $0.components(separatedBy: .newlines) })
+                }
             }
 
             if mission.children.count < 5 {

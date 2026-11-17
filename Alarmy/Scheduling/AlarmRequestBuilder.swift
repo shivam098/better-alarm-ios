@@ -42,7 +42,7 @@ public struct AlarmRequestBuilder: Sendable {
                 role: .primary,
                 mission: alarm.mission,
                 soundID: alarm.soundID,
-                allowSnooze: alarm.snooze.isEnabled,
+                allowSnooze: alarm.snooze.isEnabled && !alarm.snooze.costsMission,
                 snoozeMinutes: alarm.snooze.duration,
                 isRepeating: alarm.isRepeating
             )
@@ -57,7 +57,7 @@ public struct AlarmRequestBuilder: Sendable {
                 title: entry.alertTitle,
                 role: .watchdog(index: entry.index),
                 mission: entry.mission,
-                soundID: alarm.soundID,
+                soundID: alarm.audioOptions?.backupSoundID ?? alarm.soundID,
                 // A watchdog exists because the user evaded the mission. Letting
                 // them snooze it would reopen the loophole (PRD REL-2).
                 allowSnooze: false,
@@ -88,7 +88,7 @@ public struct AlarmRequestBuilder: Sendable {
                 role: .snooze(round: round),
                 mission: alarm.mission,
                 soundID: alarm.soundID,
-                allowSnooze: SnoozePolicy.remaining(settings: alarm.snooze, snoozeCount: round) != 0,
+                allowSnooze: alarm.snooze.isEnabled && SnoozePolicy.remaining(settings: alarm.snooze, snoozeCount: round) != 0,
                 snoozeMinutes: SnoozePolicy.duration(for: alarm.snooze, snoozeCount: round),
                 isRepeating: false
             )
@@ -103,7 +103,7 @@ public struct AlarmRequestBuilder: Sendable {
                 title: entry.alertTitle,
                 role: .watchdog(index: entry.index),
                 mission: entry.mission,
-                soundID: alarm.soundID,
+                soundID: alarm.audioOptions?.backupSoundID ?? alarm.soundID,
                 allowSnooze: false,
                 snoozeMinutes: alarm.snooze.duration,
                 isRepeating: false
@@ -111,6 +111,25 @@ public struct AlarmRequestBuilder: Sendable {
         })
 
         return requests
+    }
+
+    public func requests(for check: PendingWakeCheck) -> [SystemAlarmRequest] {
+        [
+            SystemAlarmRequest(
+                alarmID: check.alarm.id, occurrenceKey: check.checkKey,
+                fireDate: check.checkAt, title: "Still awake? \(check.alarm.name)",
+                role: .wakeCheck, mission: MissionConfig(type: .none),
+                soundID: check.alarm.soundID, allowSnooze: false,
+                snoozeMinutes: 0, isRepeating: false
+            ),
+            SystemAlarmRequest(
+                alarmID: check.alarm.id, occurrenceKey: check.reAlarmKey,
+                fireDate: check.deadline, title: "Wake check missed: \(check.alarm.name)",
+                role: .wakeReAlarm, mission: check.alarm.mission,
+                soundID: check.alarm.audioOptions?.backupSoundID ?? check.alarm.soundID,
+                allowSnooze: false, snoozeMinutes: 0, isRepeating: false
+            )
+        ]
     }
 
     /// Trims the full wish-list down to what the platform will accept,

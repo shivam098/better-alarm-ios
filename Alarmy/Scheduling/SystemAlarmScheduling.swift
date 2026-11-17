@@ -9,6 +9,8 @@ public enum SystemAlarmRole: Hashable, Sendable {
     case watchdog(index: Int)
     /// A one-off alarm created when the user snoozed.
     case snooze(round: Int)
+    case wakeCheck
+    case wakeReAlarm
 
     var isWatchdog: Bool {
         if case .watchdog = self { return true }

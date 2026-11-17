@@ -17,10 +17,15 @@ struct MissionRunnerView: View {
     @StateObject private var interruptions = InterruptionMonitor()
     @StateObject private var audio = AlarmAudioSessionBox()
 
-    let session: RingingSession
+    let initialSession: RingingSession
+
+    init(session: RingingSession) { self.initialSession = session }
+
+    private var session: RingingSession { coordinator.session ?? initialSession }
 
     @State private var stepIndex = 0
     @State private var now = Date()
+    @State private var fallback: MissionConfig?
 
     private let tick = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
 
@@ -36,16 +41,30 @@ struct MissionRunnerView: View {
             VStack(spacing: 20) {
                 header
 
-                if let step = currentStep {
+                if session.occurrenceKey.hasSuffix("#wake-check") {
+                    VStack(spacing: 20) {
+                        Text("Still awake?").font(.largeTitle.bold())
+                        Text("Confirm before the response window ends, or your alarm will ring again.")
+                        Button("I'm awake") { Task { await coordinator.completeMission() } }
+                            .buttonStyle(.borderedProminent)
+                    }
+                    .frame(maxHeight: .infinity)
+                } else if session.missionSatisfied {
+                    Button("Retry finishing") { Task { await coordinator.completeMission() } }
+                        .buttonStyle(.borderedProminent)
+                        .frame(maxHeight: .infinity)
+                } else if let step = currentStep {
                     MissionStepView(
                         config: step,
                         challenges: challenges,
                         onSolved: advance,
                         onFailed: { failure in
                             Task { await coordinator.failMission(reason: failure) }
-                        }
+                            if case .sensorUnavailable = failure { useFallback() }
+                        },
+                        onFallback: useFallback
                     )
-                    .id(stepIndex)
+                    .id("\(stepIndex)-\(step.type.rawValue)")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .transition(.opacity)
                 } else {
@@ -60,14 +79,14 @@ struct MissionRunnerView: View {
         .onReceive(tick) { now = $0 }
         .onReceive(interruptions.events) { event in
             Task { await coordinator.noteAppLifecycle(event) }
+            if event == .callEnded { audio.session.resume() }
+            if event == .callStarted { audio.session.pause() }
+            if event == .audioRouteChanged && interruptions.routeIsExternal { audio.session.routeToSpeaker() }
         }
         .onAppear {
-            audio.session.activate()
-            audio.session.play(
-                soundID: session.alarm.soundID,
-                volume: session.alarm.volume,
-                gentleRamp: session.alarm.gentleRamp
-            )
+            audio.session.play(alarm: session.alarm, usesBackup: session.occurrenceKey.contains("#wd") || session.occurrenceKey.hasSuffix("#wake-realarm")) {
+                coordinator.banner = $0
+            }
         }
         .onDisappear { audio.session.stop() }
     }
@@ -153,34 +172,44 @@ struct MissionRunnerView: View {
     /// A combination mission runs its children in order; everything else is a
     /// single step that handles its own repetitions internally.
     private var steps: [MissionConfig] {
-        session.mission.type == .combination && !session.mission.children.isEmpty
-            ? session.mission.children
-            : [session.mission]
+        session.mission.normalized().steps
     }
 
     private var currentStep: MissionConfig? {
-        stepIndex < steps.count ? steps[stepIndex] : nil
+        stepIndex < steps.count ? (fallback ?? steps[stepIndex]) : nil
     }
 
     private func advance() {
+        fallback = nil
         if stepIndex + 1 < steps.count {
             withAnimation { stepIndex += 1 }
         } else {
             Task { await coordinator.completeMission() }
+        }
+
+        private func useFallback() {
+            guard let step = currentStep else { return }
+            fallback = MissionConfig(type: session.alarm.resolvedFallback(excluding: Set(MissionPermission.allPermissions)),
+                                     difficulty: step.difficulty)
+            Task { await coordinator.noteFallback(from: step.type, to: fallback?.type ?? .math) }
         }
     }
 
     // MARK: - Snooze
 
     private var canSnooze: Bool {
-        SnoozePolicy.canSnooze(
+        !session.occurrenceKey.contains("#wd") && !session.occurrenceKey.contains("#wake-")
+        && !session.snoozeAfterMission && SnoozePolicy.canSnooze(
             settings: session.alarm.snooze,
             snoozeCount: session.snoozeCount,
-            missionSatisfied: session.missionSatisfied
+            missionSatisfied: true
         )
     }
 
     private var snoozeLabel: String {
+        if session.alarm.snooze.costsMission && !session.missionSatisfied {
+            return "Complete mission to snooze"
+        }
         let minutes = SnoozePolicy.duration(for: session.alarm.snooze, snoozeCount: session.snoozeCount)
         if let remaining = SnoozePolicy.remaining(settings: session.alarm.snooze, snoozeCount: session.snoozeCount) {
             return "Snooze \(minutes) min · \(remaining) left"
@@ -214,8 +243,15 @@ struct MissionStepView: View {
     @ObservedObject var challenges: ChallengeHistoryStore
     let onSolved: () -> Void
     let onFailed: (MissionFailure) -> Void
+    let onFallback: () -> Void
 
     var body: some View {
+        MissionPermissionGate(permissions: config.requiredPermissions, onFallback: onFallback) {
+            missionBody
+        }
+    }
+
+    @ViewBuilder private var missionBody: some View {
         switch config.type {
         case .none:
             SlideToStopMissionView(onSolved: onSolved)
@@ -234,12 +270,11 @@ struct MissionStepView: View {
         case .squat:
             SquatMissionView(config: config, onSolved: onSolved, onFailed: onFailed)
         case .photo:
-            PhotoMissionView(config: config, onSolved: onSolved, onFailed: onFailed)
+            PhotoMissionView(config: config, onSolved: onSolved, onFailed: onFailed, onFallback: onFallback)
         case .qr:
-            CodeMissionView(config: config, onSolved: onSolved, onFailed: onFailed)
+            CodeMissionView(config: config, onSolved: onSolved, onFailed: onFailed, onFallback: onFallback)
         case .combination:
-            // Flattened by the runner before it gets here.
-            MathMissionView(config: config, challenges: challenges, onSolved: onSolved, onFailed: onFailed)
+            ContentUnavailableView("Invalid mission sequence", systemImage: "exclamationmark.triangle")
         }
     }
 }
@@ -251,6 +286,11 @@ struct MissionPreviewView: View {
 
     let config: MissionConfig
     @State private var solved = false
+    @State private var index = 0
+    @State private var fallback: MissionConfig?
+    @State private var message: String?
+
+    private var steps: [MissionConfig] { config.normalized().steps }
 
     var body: some View {
         NavigationStack {
@@ -263,11 +303,20 @@ struct MissionPreviewView: View {
                     )
                 } else {
                     MissionStepView(
-                        config: config,
+                        config: fallback ?? steps[index],
                         challenges: challenges,
-                        onSolved: { solved = true },
-                        onFailed: { _ in }
+                        onSolved: {
+                            fallback = nil
+                            if index + 1 < steps.count { index += 1 } else { solved = true }
+                        },
+                        onFailed: {
+                            message = $0.userMessage
+                            if case .sensorUnavailable = $0 { fallback = .default }
+                        },
+                        onFallback: { fallback = .default }
                     )
+                    .id("\(index)-\((fallback ?? steps[index]).type.rawValue)")
+                    if let message { Text(message).font(.footnote).foregroundStyle(.orange) }
                 }
             }
             .padding()

@@ -20,10 +20,14 @@ actor AlarmStore {
     private let alarmsURL: URL
     private let occurrencesURL: URL
     private let scheduledKeysURL: URL
+    private let wakeChecksURL: URL
+    private let snoozesURL: URL
 
     private var alarms: [Alarm] = []
     private var occurrences: [AlarmOccurrence] = []
     private var scheduledKeys: Set<String> = []
+    private var wakeChecks: [PendingWakeCheck] = []
+    private var snoozes: [PendingSnooze] = []
     private var loaded = false
 
     /// Keeps history bounded so the file stays small on a device that has been
@@ -39,6 +43,8 @@ actor AlarmStore {
         self.alarmsURL = resolved.appendingPathComponent("alarms.json")
         self.occurrencesURL = resolved.appendingPathComponent("occurrences.json")
         self.scheduledKeysURL = resolved.appendingPathComponent("scheduled-keys.json")
+        self.wakeChecksURL = resolved.appendingPathComponent("wake-checks.json")
+        self.snoozesURL = resolved.appendingPathComponent("snoozes.json")
     }
 
     // MARK: - Loading
@@ -52,6 +58,8 @@ actor AlarmStore {
         alarms = decode([Alarm].self, from: alarmsURL) ?? []
         occurrences = decode([AlarmOccurrence].self, from: occurrencesURL) ?? []
         scheduledKeys = Set(decode([String].self, from: scheduledKeysURL) ?? [])
+        wakeChecks = decode([PendingWakeCheck].self, from: wakeChecksURL) ?? []
+        snoozes = decode([PendingSnooze].self, from: snoozesURL) ?? []
     }
 
     private func decode<T: Decodable>(_ type: T.Type, from url: URL) -> T? {
@@ -75,13 +83,10 @@ actor AlarmStore {
 
         guard let data = try? encoder.encode(value) else { return }
 
-        let temporary = url.appendingPathExtension("tmp")
         do {
-            try data.write(to: temporary, options: .atomic)
-            _ = try FileManager.default.replaceItemAt(url, withItemAt: temporary)
+            try data.write(to: url, options: .atomic)
         } catch {
-            // Fall back to a direct atomic write rather than losing the data.
-            try? data.write(to: url, options: .atomic)
+            AlarmyLog.persistence.error("Write failed for \(url.lastPathComponent): \(error.localizedDescription)")
         }
     }
 
@@ -177,6 +182,32 @@ actor AlarmStore {
         loadIfNeeded()
         scheduledKeys = keys
         write(Array(keys).sorted(), to: scheduledKeysURL)
+    }
+
+    func allWakeChecks() -> [PendingWakeCheck] {
+        loadIfNeeded()
+        return wakeChecks
+    }
+
+    func setWakeChecks(_ checks: [PendingWakeCheck]) throws {
+        loadIfNeeded()
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        try encoder.encode(checks).write(to: wakeChecksURL, options: .atomic)
+        wakeChecks = checks
+    }
+
+    func allSnoozes() -> [PendingSnooze] {
+        loadIfNeeded()
+        return snoozes
+    }
+
+    func setSnoozes(_ pending: [PendingSnooze]) throws {
+        loadIfNeeded()
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        try encoder.encode(pending).write(to: snoozesURL, options: .atomic)
+        snoozes = pending
     }
 
     /// Every key belonging to the same firing: the parent plus its watchdogs and

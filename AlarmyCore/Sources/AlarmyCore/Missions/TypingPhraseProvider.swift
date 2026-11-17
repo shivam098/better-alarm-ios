@@ -5,6 +5,11 @@ public struct TypingChallenge: Hashable, Sendable {
     /// When false, case and punctuation are forgiven but spelling is not.
     public let caseSensitive: Bool
 
+    public init(phrase: String, caseSensitive: Bool = false) {
+        self.phrase = phrase
+        self.caseSensitive = caseSensitive
+    }
+
     public var signature: String { "type:\(phrase)" }
 
     /// Compares an attempt against the phrase under the configured strictness.
@@ -71,6 +76,7 @@ public enum TypingPhraseProvider {
 
     public static func generate(
         difficulty: MissionDifficulty,
+        customSentences: [String] = [],
         caseSensitive: Bool = false,
         excluding history: Set<String> = [],
         using rng: inout SeededGenerator
@@ -78,10 +84,13 @@ public enum TypingPhraseProvider {
         let target = targetLength(for: difficulty)
 
         // Prefer phrases close to the target length for this difficulty.
-        let ranked = phrases.sorted {
+        let custom = customSentences.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let source = custom.isEmpty ? phrases : custom
+        let ranked = source.sorted {
             abs($0.count - target) < abs($1.count - target)
         }
-        let shortlist = Array(ranked.prefix(max(6, phrases.count / 2)))
+        let shortlist = Array(ranked.prefix(max(6, source.count / 2)))
 
         var local = rng
         let challenge = UniqueChallengeFactory.make(

@@ -16,6 +16,7 @@ struct AlarmyApp: App {
                 // would be a way to ignore the alarm (PRD MEN-4).
                 .fullScreenCover(item: $coordinator.session) { session in
                     MissionRunnerView(session: session)
+                        .id(session.id)
                         .environmentObject(coordinator)
                         .interactiveDismissDisabled()
                 }

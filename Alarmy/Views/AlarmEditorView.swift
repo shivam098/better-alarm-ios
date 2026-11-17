@@ -45,6 +45,7 @@ struct AlarmEditorView: View {
 
                 missionSection
                 missionGuardSection
+                wakeCheckSection
                 snoozeSection
                 soundSection
 
@@ -101,11 +102,10 @@ struct AlarmEditorView: View {
             .tint(.primary)
 
             if draft.mission.type != .none {
-                Stepper(
-                    "Repetitions: \(draft.mission.targetCount)",
-                    value: $draft.mission.targetCount,
-                    in: MissionConfig.targetRange(for: draft.mission.type)
-                )
+                if draft.mission.needsTarget {
+                    Label("Register a photo or code target in mission setup.", systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.orange)
+                }
 
                 Picker("If sensors are unavailable", selection: fallbackBinding) {
                     Text("Choose automatically").tag(MissionType?.none)
@@ -165,6 +165,22 @@ struct AlarmEditorView: View {
                     ForEach(1...5, id: \.self) { limit in
                         Text("\(limit) time\(limit == 1 ? "" : "s")").tag(Int?.some(limit))
                     }
+
+                    private var wakeCheckSection: some View {
+                        Section {
+                            Toggle("Check I'm still awake", isOn: wakeEnabled)
+                            if draft.wakeCheck?.isEnabled == true {
+                                Stepper("Check after \(draft.wakeCheck?.delayMinutes ?? 5) min",
+                                        value: wakeDelay, in: 1...30)
+                                Stepper("Respond within \(draft.wakeCheck?.responseMinutes ?? 1) min",
+                                        value: wakeResponse, in: 1...5)
+                            }
+                        } header: {
+                            Text("After dismissal")
+                        } footer: {
+                            Text("Separate from Mission Guard. After you finish, a system alarm asks if you're still awake. Confirm in the app; Stop alone does not confirm. A second alarm is scheduled in advance if you don't respond.")
+                        }
+                    }
                 }
 
                 Toggle("Each snooze gets shorter", isOn: $draft.snooze.escalating)
@@ -181,11 +197,23 @@ struct AlarmEditorView: View {
                 }
             }
             Toggle("Start quiet and build up", isOn: $draft.gentleRamp)
+            if draft.gentleRamp {
+                Stepper("Build up over \(draft.audioOptions?.rampSeconds ?? 30) sec", value: rampSeconds, in: 5...120, step: 5)
+            }
+            Picker("Backup tone", selection: backupSound) {
+                ForEach(SoundLibrary.all) { sound in
+                    Text(sound.displayName).tag(sound.id)
+                }
+            }
+            Toggle("Speak alarm label", isOn: speaksLabel)
+            Toggle("Speak current time", isOn: speaksTime)
             Toggle("Vibrate", isOn: $draft.vibrationEnabled)
             VStack(alignment: .leading) {
                 Text("Volume")
                 Slider(value: $draft.volume, in: 0.2...1.0)
             }
+            Text("Volume, ramp, vibration and speech apply while the app is running the mission. iOS controls system-alarm volume, vibration and audio routes. Backup tone is also used for Mission Guard and wake-check re-alarms.")
+                .font(.caption).foregroundStyle(.secondary)
         }
     }
 
@@ -196,7 +224,7 @@ struct AlarmEditorView: View {
     }
 
     private var automaticFallbacks: [MissionType] {
-        draft.mission.type.fallbackChain
+        draft.mission.type.fallbackChain.filter { $0.requiredPermissions.isEmpty }
     }
 
     private var fallbackBinding: Binding<MissionType?> {
@@ -207,11 +235,42 @@ struct AlarmEditorView: View {
         Binding(get: { draft.snooze.limit }, set: { draft.snooze.limit = $0 })
     }
 
+    private func audioBinding<T>(_ keyPath: WritableKeyPath<AlarmAudioOptions, T>) -> Binding<T> {
+        Binding(get: { (draft.audioOptions ?? AlarmAudioOptions())[keyPath: keyPath] },
+                set: { value in
+                    var options = draft.audioOptions ?? AlarmAudioOptions()
+                    options[keyPath: keyPath] = value
+                    draft.audioOptions = options
+                })
+    }
+
+    private var rampSeconds: Binding<Int> { audioBinding(\.rampSeconds) }
+    private var backupSound: Binding<String> { audioBinding(\.backupSoundID) }
+    private var speaksLabel: Binding<Bool> { audioBinding(\.speaksLabel) }
+    private var speaksTime: Binding<Bool> { audioBinding(\.speaksTime) }
+
+    private func wakeBinding<T>(_ keyPath: WritableKeyPath<WakeCheckSettings, T>) -> Binding<T> {
+        Binding(get: { (draft.wakeCheck ?? WakeCheckSettings())[keyPath: keyPath] },
+                set: { value in
+                    var settings = draft.wakeCheck ?? WakeCheckSettings()
+                    settings[keyPath: keyPath] = value
+                    draft.wakeCheck = settings
+                })
+    }
+
+    private var wakeEnabled: Binding<Bool> { wakeBinding(\.isEnabled) }
+    private var wakeDelay: Binding<Int> { wakeBinding(\.delayMinutes) }
+    private var wakeResponse: Binding<Int> { wakeBinding(\.responseMinutes) }
+
     private func save() {
         let components = Calendar.current.dateComponents([.hour, .minute], from: time)
         draft.hour = components.hour ?? 7
         draft.minute = components.minute ?? 0
         draft.mission = draft.mission.normalized()
+        guard !draft.mission.needsTarget else {
+            showingMissionPicker = true
+            return
+        }
         if draft.name.trimmingCharacters(in: .whitespaces).isEmpty { draft.name = "Alarm" }
 
         Task {

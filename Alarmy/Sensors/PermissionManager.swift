@@ -23,11 +23,14 @@ struct PermissionManager: Sendable {
             @unknown default: return .notDetermined
             }
 
-        case .motion, .motionFitness:
-            guard CMPedometer.isStepCountingAvailable() || CMMotionActivityManager.isActivityAvailable() else {
+        case .motion:
+            return CMMotionManager().isDeviceMotionAvailable ? .granted : .unavailable
+
+        case .motionFitness:
+            guard CMPedometer.isStepCountingAvailable() else {
                 return .unavailable
             }
-            switch CMMotionActivityManager.authorizationStatus() {
+            switch CMPedometer.authorizationStatus() {
             case .authorized: return .granted
             case .denied, .restricted: return .denied
             case .notDetermined: return .notDetermined
@@ -54,7 +57,9 @@ struct PermissionManager: Sendable {
             let granted = await AVCaptureDevice.requestAccess(for: .video)
             return granted ? .granted : .denied
 
-        case .motion, .motionFitness:
+        case .motion:
+            return await status(for: .motion)
+        case .motionFitness:
             // CoreMotion has no explicit request API: the prompt appears on
             // first use, so a throwaway query is the request.
             let pedometer = CMPedometer()

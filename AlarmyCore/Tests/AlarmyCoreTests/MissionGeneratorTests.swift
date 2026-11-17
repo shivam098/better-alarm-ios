@@ -5,6 +5,58 @@ import XCTest
 /// is a challenge a half-asleep user can complete without waking up.
 final class MissionGeneratorTests: XCTestCase {
 
+    func testCustomTypingUsesSavedSentencesAndIgnoresBlankLines() {
+        var rng = SeededGenerator(seed: 17)
+        let challenge = TypingPhraseProvider.generate(
+            difficulty: .hard, customSentences: ["  ", "  Put both feet on the floor  "], using: &rng
+        )
+        XCTAssertEqual(challenge.phrase, "Put both feet on the floor")
+        XCTAssertTrue(challenge.matches("put both feet on the floor"))
+        let builtIn = TypingPhraseProvider.generate(difficulty: .easy, customSentences: ["\n"], using: &rng)
+        XCTAssertFalse(builtIn.phrase.isEmpty)
+    }
+
+    func testCombinationNormalizationPreservesConfiguredChildrenAndTargets() {
+        let photo = MissionConfig(type: .photo, targetCount: 2, referenceAssetIDs: ["target"])
+        let typing = MissionConfig(type: .typing, difficulty: .hard, targetCount: 4, customSentences: ["Get up"])
+        let config = MissionConfig(type: .combination, children: [photo, typing]).normalized()
+        XCTAssertEqual(config.steps, [photo, typing])
+        XCTAssertFalse(config.needsTarget)
+        XCTAssertEqual(config.targetCount, 2)
+        XCTAssertEqual(MissionConfig(type: .combination, children: []).normalized().steps.count, 2)
+        XCTAssertTrue(MissionConfig(type: .combination, children: [photo, MissionConfig(type: .qr)]).needsTarget)
+    }
+
+    func testOldAlarmsAndMissionsDecodeWithoutNewSettings() throws {
+        let encoder = JSONEncoder()
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: encoder.encode(Alarm())) as? [String: Any])
+        json.removeValue(forKey: "audioOptions")
+        json.removeValue(forKey: "wakeCheck")
+        var mission = try XCTUnwrap(json["mission"] as? [String: Any])
+        mission.removeValue(forKey: "customSentences")
+        json["mission"] = mission
+        let decoded = try JSONDecoder().decode(Alarm.self, from: JSONSerialization.data(withJSONObject: json))
+        XCTAssertNil(decoded.audioOptions)
+        XCTAssertNil(decoded.wakeCheck)
+        XCTAssertNil(decoded.mission.customSentences)
+        XCTAssertEqual(decoded.mission, .default)
+    }
+
+    func testWakeCheckPersistsSnapshotAndIndependentResponseDeadline() throws {
+        let alarm = Alarm(wakeCheck: WakeCheckSettings(isEnabled: true, delayMinutes: 5, responseMinutes: 2))
+        let completed = Date(timeIntervalSince1970: 1_000)
+        let check = PendingWakeCheck(parentKey: "root", alarm: alarm, completedAt: completed)
+        XCTAssertEqual(check.checkAt, completed.addingTimeInterval(300))
+        XCTAssertEqual(check.deadline, completed.addingTimeInterval(420))
+        let restored = try JSONDecoder().decode(PendingWakeCheck.self, from: JSONEncoder().encode(check))
+        XCTAssertEqual(restored, check)
+        XCTAssertNotEqual(restored.checkKey, restored.reAlarmKey)
+        let followUp = AlarmOccurrence(alarmID: alarm.id, occurrenceKey: restored.checkKey,
+                                       scheduledAt: restored.checkAt, outcome: .completed,
+                                       missionType: .none, difficulty: .medium)
+        XCTAssertEqual(StatisticsCalculator.summarise([followUp]).totalAlarms, 0)
+    }
+
     // MARK: - Math
 
     func testMathBatchNeverRepeatsAProblem() {

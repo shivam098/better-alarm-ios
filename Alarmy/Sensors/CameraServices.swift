@@ -19,10 +19,13 @@ final class CameraSession: NSObject {
 
     private var frameHandler: ((CVPixelBuffer) -> Void)?
     private var codeHandler: ((String) -> Void)?
+    private var noCodeHandler: (() -> Void)?
+    private var configured = false
 
     var captureSession: AVCaptureSession { session }
 
     func configure(position: AVCaptureDevice.Position = .front, scanCodes: Bool = false) throws {
+        guard !configured else { return }
         session.beginConfiguration()
         defer { session.commitConfiguration() }
 
@@ -46,11 +49,14 @@ final class CameraSession: NSObject {
             output.setSampleBufferDelegate(self, queue: queue)
             session.addOutput(output)
         }
+        configured = true
     }
 
-    func start(onFrame: ((CVPixelBuffer) -> Void)? = nil, onCode: ((String) -> Void)? = nil) {
+    func start(onFrame: ((CVPixelBuffer) -> Void)? = nil, onCode: ((String) -> Void)? = nil,
+               onNoCode: (() -> Void)? = nil) {
         frameHandler = onFrame
         codeHandler = onCode
+        noCodeHandler = onNoCode
         queue.async { [session] in
             guard !session.isRunning else { return }
             session.startRunning()
@@ -60,6 +66,7 @@ final class CameraSession: NSObject {
     func stop() {
         frameHandler = nil
         codeHandler = nil
+        noCodeHandler = nil
         queue.async { [session] in
             guard session.isRunning else { return }
             session.stopRunning()
@@ -82,7 +89,7 @@ extension CameraSession: AVCaptureVideoDataOutputSampleBufferDelegate {
         from connection: AVCaptureConnection
     ) {
         guard let buffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-        frameHandler?(buffer)
+        DispatchQueue.main.async { [weak self] in self?.frameHandler?(buffer) }
     }
 }
 
@@ -92,10 +99,13 @@ extension CameraSession: AVCaptureMetadataOutputObjectsDelegate {
         didOutput metadataObjects: [AVMetadataObject],
         from connection: AVCaptureConnection
     ) {
+        if metadataObjects.isEmpty {
+            DispatchQueue.main.async { [weak self] in self?.noCodeHandler?() }
+        }
         for object in metadataObjects {
             guard let readable = object as? AVMetadataMachineReadableCodeObject,
                   let value = readable.stringValue else { continue }
-            codeHandler?(value)
+            DispatchQueue.main.async { [weak self] in self?.codeHandler?(value) }
         }
     }
 }

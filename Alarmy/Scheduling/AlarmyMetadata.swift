@@ -38,6 +38,12 @@ struct AlarmyMetadata: AlarmMetadata {
         case .snooze(let round):
             self.role = "snooze"
             self.watchdogIndex = round
+        case .wakeCheck:
+            self.role = "wakeCheck"
+            self.watchdogIndex = 0
+        case .wakeReAlarm:
+            self.role = "wakeReAlarm"
+            self.watchdogIndex = 0
         }
     }
 }

@@ -44,7 +44,7 @@ public enum StatisticsCalculator {
         calendar: Calendar = .current,
         now: Date = Date()
     ) -> WakeStatistics {
-        let resolved = occurrences.filter { $0.outcome != nil }
+        let resolved = occurrences.filter { $0.outcome != nil && !$0.occurrenceKey.contains("#wake-") }
         guard !resolved.isEmpty else { return .empty }
 
         let completed = resolved.filter { $0.outcome == .completed }

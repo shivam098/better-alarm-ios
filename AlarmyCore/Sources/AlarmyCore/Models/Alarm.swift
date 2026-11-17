@@ -84,6 +84,9 @@ public struct Alarm: Identifiable, Codable, Hashable, Sendable {
     public var volume: Double
     public var gentleRamp: Bool
     public var vibrationEnabled: Bool
+    /// Optional so alarms saved before these features continue to decode.
+    public var audioOptions: AlarmAudioOptions?
+    public var wakeCheck: WakeCheckSettings?
 
     public var snooze: SnoozeSettings
     public var mission: MissionConfig
@@ -107,6 +110,8 @@ public struct Alarm: Identifiable, Codable, Hashable, Sendable {
         volume: Double = 1.0,
         gentleRamp: Bool = true,
         vibrationEnabled: Bool = true,
+        audioOptions: AlarmAudioOptions? = nil,
+        wakeCheck: WakeCheckSettings? = nil,
         snooze: SnoozeSettings = .default,
         mission: MissionConfig = .default,
         fallbackMission: MissionType? = nil,
@@ -126,6 +131,8 @@ public struct Alarm: Identifiable, Codable, Hashable, Sendable {
         self.volume = volume
         self.gentleRamp = gentleRamp
         self.vibrationEnabled = vibrationEnabled
+        self.audioOptions = audioOptions
+        self.wakeCheck = wakeCheck
         self.snooze = snooze
         self.mission = mission
         self.fallbackMission = fallbackMission
@@ -140,14 +147,77 @@ public struct Alarm: Identifiable, Codable, Hashable, Sendable {
     /// otherwise walking the mission's own fallback chain (PRD PRM-4).
     public func resolvedFallback(excluding unavailable: Set<MissionPermission>) -> MissionType {
         if let explicit = fallbackMission,
+           explicit != .none, explicit != .combination,
+           explicit.requiredPermissions.isEmpty,
            explicit.requiredPermissions.isDisjoint(with: unavailable) {
             return explicit
         }
         for candidate in mission.type.fallbackChain
-        where candidate.requiredPermissions.isDisjoint(with: unavailable) {
+        where candidate.requiredPermissions.isEmpty && candidate.requiredPermissions.isDisjoint(with: unavailable) {
             return candidate
         }
         return .math
+    }
+
+    public struct AlarmAudioOptions: Codable, Hashable, Sendable {
+        public var backupSoundID: String
+        public var rampSeconds: Int
+        public var speaksLabel: Bool
+        public var speaksTime: Bool
+
+        public init(backupSoundID: String = "klaxon", rampSeconds: Int = 30,
+                    speaksLabel: Bool = false, speaksTime: Bool = false) {
+            self.backupSoundID = backupSoundID
+            self.rampSeconds = rampSeconds
+            self.speaksLabel = speaksLabel
+            self.speaksTime = speaksTime
+        }
+    }
+
+    public struct WakeCheckSettings: Codable, Hashable, Sendable {
+        public var isEnabled: Bool
+        public var delayMinutes: Int
+        public var responseMinutes: Int
+
+        public init(isEnabled: Bool = false, delayMinutes: Int = 5, responseMinutes: Int = 1) {
+            self.isEnabled = isEnabled
+            self.delayMinutes = delayMinutes
+            self.responseMinutes = responseMinutes
+        }
+    }
+
+    /// Separate from mission history: clearing history must not disarm a wake check.
+    public struct PendingWakeCheck: Codable, Hashable, Identifiable, Sendable {
+        public var id: String { parentKey }
+        public let parentKey: String
+        public let alarm: Alarm
+        public let checkAt: Date
+        public let deadline: Date
+
+        public init(parentKey: String, alarm: Alarm, completedAt: Date) {
+            let settings = alarm.wakeCheck ?? WakeCheckSettings()
+            self.parentKey = parentKey
+            self.alarm = alarm
+            self.checkAt = completedAt.addingTimeInterval(TimeInterval(max(1, min(30, settings.delayMinutes)) * 60))
+            self.deadline = checkAt.addingTimeInterval(TimeInterval(max(1, min(5, settings.responseMinutes)) * 60))
+        }
+
+        public struct PendingSnooze: Codable, Hashable, Sendable {
+            public let alarm: Alarm
+            public let parentKey: String
+            public let round: Int
+            public let fireDate: Date
+
+            public init(alarm: Alarm, parentKey: String, round: Int, fireDate: Date) {
+                self.alarm = alarm
+                self.parentKey = parentKey
+                self.round = round
+                self.fireDate = fireDate
+            }
+        }
+
+        public var checkKey: String { "\(parentKey)#wake-check" }
+        public var reAlarmKey: String { "\(parentKey)#wake-realarm" }
     }
 
     /// `true` when the mission cannot be silently bypassed by pressing Stop.
@@ -169,13 +239,13 @@ public enum SoundLibrary {
     public static let defaultSoundID = "radar"
 
     public static let all: [Sound] = [
-        Sound(id: "radar", displayName: "Radar", fileName: "radar.caf", isGentle: false),
-        Sound(id: "ascend", displayName: "Ascend", fileName: "ascend.caf", isGentle: true),
-        Sound(id: "sunrise", displayName: "Sunrise", fileName: "sunrise.caf", isGentle: true),
-        Sound(id: "chimes", displayName: "Chimes", fileName: "chimes.caf", isGentle: true),
-        Sound(id: "klaxon", displayName: "Klaxon", fileName: "klaxon.caf", isGentle: false),
-        Sound(id: "siren", displayName: "Siren", fileName: "siren.caf", isGentle: false),
-        Sound(id: "insistent", displayName: "Insistent", fileName: "insistent.caf", isGentle: false)
+        Sound(id: "radar", displayName: "Radar", fileName: "radar.wav", isGentle: false),
+        Sound(id: "ascend", displayName: "Ascend", fileName: "ascend.wav", isGentle: true),
+        Sound(id: "sunrise", displayName: "Sunrise", fileName: "sunrise.wav", isGentle: true),
+        Sound(id: "chimes", displayName: "Chimes", fileName: "chimes.wav", isGentle: true),
+        Sound(id: "klaxon", displayName: "Klaxon", fileName: "klaxon.wav", isGentle: false),
+        Sound(id: "siren", displayName: "Siren", fileName: "siren.wav", isGentle: false),
+        Sound(id: "insistent", displayName: "Insistent", fileName: "insistent.wav", isGentle: false)
     ]
 
     public static func sound(for id: String) -> Sound {

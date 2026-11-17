@@ -84,17 +84,20 @@ public struct AlarmStateContext: Hashable, Sendable {
     /// Whether the mission has already been satisfied during this firing,
     /// which "snooze costs a mission" depends on (PRD SNZ-6).
     public var missionSatisfied: Bool
+    public var snoozeAfterMission: Bool
 
     public init(
         snooze: SnoozeSettings = .default,
         snoozeCount: Int = 0,
         missionType: MissionType = .math,
-        missionSatisfied: Bool = false
+        missionSatisfied: Bool = false,
+        snoozeAfterMission: Bool = false
     ) {
         self.snooze = snooze
         self.snoozeCount = snoozeCount
         self.missionType = missionType
         self.missionSatisfied = missionSatisfied
+        self.snoozeAfterMission = snoozeAfterMission
     }
 }
 
@@ -142,6 +145,12 @@ public enum AlarmStateMachine {
             )
 
         case (.ringing, .missionCompleted), (.missionActive, .missionCompleted):
+            if context.snoozeAfterMission {
+                var satisfied = context
+                satisfied.missionSatisfied = true
+                satisfied.snoozeAfterMission = false
+                return reduce(state: state, event: .snoozeRequested, context: satisfied)
+            }
             return AlarmTransition(
                 state: .completed,
                 effects: [.stopAudio, .cancelWatchdogChain, .recordOutcome(.completed)]
@@ -191,8 +200,8 @@ public enum AlarmStateMachine {
             return AlarmTransition(
                 state: .snoozed,
                 effects: [
-                    .stopAudio,
                     .scheduleSnooze(minutes: minutes),
+                    .stopAudio,
                     .rescheduleWatchdogChain,
                     .recordOutcome(.snoozed)
                 ]
@@ -241,6 +250,15 @@ public enum AlarmStateMachine {
 
 /// Snooze rules (PRD SNZ-1 … SNZ-8).
 public enum SnoozePolicy {
+
+    /// Round is encoded in system keys as well as history so relaunching cannot
+    /// reset a limit, even if the user has cleared history.
+    public static func count(in occurrenceKey: String) -> Int {
+        occurrenceKey.split(separator: "#").compactMap { component in
+            guard component.hasPrefix("snooze") else { return nil }
+            return Int(component.dropFirst("snooze".count))
+        }.max() ?? 0
+    }
 
     public static func canSnooze(
         settings: SnoozeSettings,
