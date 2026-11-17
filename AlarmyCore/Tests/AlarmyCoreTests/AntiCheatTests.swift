@@ -234,6 +234,10 @@ final class AntiCheatTests: XCTestCase {
     func testExplicitFallbackIsHonouredWhenItIsUsable() {
         let alarm = Alarm(mission: MissionConfig(type: .photo), fallbackMission: .typing)
         XCTAssertEqual(alarm.resolvedFallback(excluding: [.camera]), .typing)
+        let targetless = Alarm(mission: MissionConfig(type: .photo), fallbackMission: .qr)
+        XCTAssertTrue(targetless.resolvedFallback(excluding: []).requiredPermissions.isEmpty)
+        let bypass = Alarm(mission: MissionConfig(type: .photo), fallbackMission: MissionType.none)
+        XCTAssertNotEqual(bypass.resolvedFallback(excluding: []), .none)
     }
 
     func testExplicitFallbackIsIgnoredWhenItAlsoNeedsADeniedPermission() {

@@ -247,7 +247,14 @@ struct MissionStepView: View {
 
     var body: some View {
         MissionPermissionGate(permissions: config.requiredPermissions, onFallback: onFallback) {
-            missionBody
+            VStack {
+                missionBody
+                if !config.requiredPermissions.isEmpty {
+                    Button("Use a backup mission", action: onFallback)
+                        .font(.footnote)
+                        .buttonStyle(.bordered)
+                }
+            }
         }
     }
 

@@ -159,70 +159,70 @@ public struct Alarm: Identifiable, Codable, Hashable, Sendable {
         return .math
     }
 
-    public struct AlarmAudioOptions: Codable, Hashable, Sendable {
-        public var backupSoundID: String
-        public var rampSeconds: Int
-        public var speaksLabel: Bool
-        public var speaksTime: Bool
-
-        public init(backupSoundID: String = "klaxon", rampSeconds: Int = 30,
-                    speaksLabel: Bool = false, speaksTime: Bool = false) {
-            self.backupSoundID = backupSoundID
-            self.rampSeconds = rampSeconds
-            self.speaksLabel = speaksLabel
-            self.speaksTime = speaksTime
-        }
-    }
-
-    public struct WakeCheckSettings: Codable, Hashable, Sendable {
-        public var isEnabled: Bool
-        public var delayMinutes: Int
-        public var responseMinutes: Int
-
-        public init(isEnabled: Bool = false, delayMinutes: Int = 5, responseMinutes: Int = 1) {
-            self.isEnabled = isEnabled
-            self.delayMinutes = delayMinutes
-            self.responseMinutes = responseMinutes
-        }
-    }
-
-    /// Separate from mission history: clearing history must not disarm a wake check.
-    public struct PendingWakeCheck: Codable, Hashable, Identifiable, Sendable {
-        public var id: String { parentKey }
-        public let parentKey: String
-        public let alarm: Alarm
-        public let checkAt: Date
-        public let deadline: Date
-
-        public init(parentKey: String, alarm: Alarm, completedAt: Date) {
-            let settings = alarm.wakeCheck ?? WakeCheckSettings()
-            self.parentKey = parentKey
-            self.alarm = alarm
-            self.checkAt = completedAt.addingTimeInterval(TimeInterval(max(1, min(30, settings.delayMinutes)) * 60))
-            self.deadline = checkAt.addingTimeInterval(TimeInterval(max(1, min(5, settings.responseMinutes)) * 60))
-        }
-
-        public struct PendingSnooze: Codable, Hashable, Sendable {
-            public let alarm: Alarm
-            public let parentKey: String
-            public let round: Int
-            public let fireDate: Date
-
-            public init(alarm: Alarm, parentKey: String, round: Int, fireDate: Date) {
-                self.alarm = alarm
-                self.parentKey = parentKey
-                self.round = round
-                self.fireDate = fireDate
-            }
-        }
-
-        public var checkKey: String { "\(parentKey)#wake-check" }
-        public var reAlarmKey: String { "\(parentKey)#wake-realarm" }
-    }
-
     /// `true` when the mission cannot be silently bypassed by pressing Stop.
     public var isGuarded: Bool {
         missionGuard.isEnabled && missionGuard.windowMinutes > 0 && mission.type != .none
+    }
+}
+
+public struct AlarmAudioOptions: Codable, Hashable, Sendable {
+    public var backupSoundID: String
+    public var rampSeconds: Int
+    public var speaksLabel: Bool
+    public var speaksTime: Bool
+
+    public init(backupSoundID: String = "klaxon", rampSeconds: Int = 30,
+                speaksLabel: Bool = false, speaksTime: Bool = false) {
+        self.backupSoundID = backupSoundID
+        self.rampSeconds = rampSeconds
+        self.speaksLabel = speaksLabel
+        self.speaksTime = speaksTime
+    }
+}
+
+public struct WakeCheckSettings: Codable, Hashable, Sendable {
+    public var isEnabled: Bool
+    public var delayMinutes: Int
+    public var responseMinutes: Int
+
+    public init(isEnabled: Bool = false, delayMinutes: Int = 5, responseMinutes: Int = 1) {
+        self.isEnabled = isEnabled
+        self.delayMinutes = delayMinutes
+        self.responseMinutes = responseMinutes
+    }
+}
+
+/// Separate from mission history: clearing history must not disarm a wake check.
+public struct PendingWakeCheck: Codable, Hashable, Identifiable, Sendable {
+    public var id: String { parentKey }
+    public let parentKey: String
+    public let alarm: Alarm
+    public let checkAt: Date
+    public let deadline: Date
+
+    public init(parentKey: String, alarm: Alarm, completedAt: Date) {
+        let settings = alarm.wakeCheck ?? WakeCheckSettings()
+        self.parentKey = parentKey
+        self.alarm = alarm
+        self.checkAt = completedAt.addingTimeInterval(TimeInterval(max(1, min(30, settings.delayMinutes)) * 60))
+        self.deadline = checkAt.addingTimeInterval(TimeInterval(max(1, min(5, settings.responseMinutes)) * 60))
+    }
+
+    public var checkKey: String { "\(parentKey)#wake-check" }
+    public var reAlarmKey: String { "\(parentKey)#wake-realarm" }
+}
+
+public struct PendingSnooze: Codable, Hashable, Sendable {
+    public let alarm: Alarm
+    public let parentKey: String
+    public let round: Int
+    public let fireDate: Date
+
+    public init(alarm: Alarm, parentKey: String, round: Int, fireDate: Date) {
+        self.alarm = alarm
+        self.parentKey = parentKey
+        self.round = round
+        self.fireDate = fireDate
     }
 }
 

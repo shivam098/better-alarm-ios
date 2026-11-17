@@ -23,7 +23,7 @@
 	<key>NSAlarmKitUsageDescription</key>
 	<string>Alarmy needs permission to schedule alarms so they can ring through Silent Mode and Focus, and keep ringing until you have completed your wake-up mission.</string>
 	<key>NSCameraUsageDescription</key>
-	<string>Used only while you are completing a camera mission, to count your squats or check the photo you took. Images are processed on your device and never uploaded.</string>
+	<string>Used only while registering a target or completing a camera mission. Images are processed on your device and never uploaded.</string>
 	<key>NSMotionUsageDescription</key>
 	<string>Used only while a movement mission is running, to confirm you really shook the phone, walked, or did your squats.</string>
 	<key>NSSupportsAlarmInterruptions</key>

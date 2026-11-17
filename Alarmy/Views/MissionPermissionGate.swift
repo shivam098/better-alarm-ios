@@ -27,10 +27,13 @@ struct MissionPermissionGate<Content: View>: View {
                                 }
                             }
                             .buttonStyle(.borderedProminent)
-                        } else {
+                        } else if blocked[permission] == .denied {
                             Button("Open Settings") {
                                 if let url = URL(string: UIApplication.openSettingsURLString) { openURL(url) }
                             }
+                        } else {
+                            Text("This sensor isn't available on this device. Choose a backup mission.")
+                                .font(.footnote)
                         }
                     }
                     Button("Use a backup mission", action: onFallback)
