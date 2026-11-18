@@ -176,6 +176,34 @@ final class AlarmCoordinatorTests: XCTestCase {
             XCTAssertNotNil(bundle.url(forResource: stem, withExtension: "wav"), sound.fileName)
         }
     }
+
+    func testAdjacentWatchdogAndSnoozeKeysHaveDistinctStableIdentifiers() {
+        let root = "01234567-89AB-CDEF-0123-456789ABCDEF-20261118-0700"
+        let keys = [root] + (1...6).flatMap { round in
+            ["\(root)#snooze\(round)"] + (1...6).map { "\(root)#snooze\(round)#wd\($0)" }
+        }
+        let ids = keys.map(SystemAlarmRequest.identifier(for:))
+        XCTAssertEqual(Set(ids).count, keys.count)
+        XCTAssertEqual(ids, keys.map(SystemAlarmRequest.identifier(for:)))
+        XCTAssertNotEqual(SystemAlarmRequest.identifier(for: root), SystemAlarmRequest.legacyIdentifier(for: root))
+    }
+
+    func testLegacyTimerIsRemovedOnlyAfterReplacementSchedules() async throws {
+        let (coordinator, _, scheduler, _) = await fixture(Alarm())
+        let requests = await scheduler.allRequests()
+        let primary = try XCTUnwrap(requests.first { $0.role == .primary })
+        let legacyID = SystemAlarmRequest.legacyIdentifier(for: primary.occurrenceKey)
+        await scheduler.seedLegacy(primary)
+        await scheduler.setFailure(true)
+        await coordinator.reconcile()
+        let failedIDs = await scheduler.pendingIdentifiers()
+        XCTAssertTrue(failedIDs.contains(legacyID))
+        await scheduler.setFailure(false)
+        await coordinator.reconcile()
+        let migratedIDs = await scheduler.pendingIdentifiers()
+        XCTAssertFalse(migratedIDs.contains(legacyID))
+        XCTAssertTrue(migratedIDs.contains(primary.id))
+    }
 }
 
 private actor TestScheduler: SystemAlarmScheduling {
@@ -183,6 +211,9 @@ private actor TestScheduler: SystemAlarmScheduling {
     private var fails = false
     func setFailure(_ value: Bool) { fails = value }
     func allRequests() -> [SystemAlarmRequest] { Array(requests.values) }
+    func seedLegacy(_ request: SystemAlarmRequest) {
+        requests = [SystemAlarmRequest.legacyIdentifier(for: request.occurrenceKey): request]
+    }
     func authorizationStatus() async -> SystemAlarmAuthorization { .authorized }
     func requestAuthorization() async -> SystemAlarmAuthorization { .authorized }
     func schedule(_ values: [SystemAlarmRequest]) async throws {

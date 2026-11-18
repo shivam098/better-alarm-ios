@@ -78,7 +78,8 @@ struct PhotoMissionView: View {
     }
 
     private func capture() {
-        guard let buffer = latestFrame, let reference,
+        guard matched < max(1, config.targetCount),
+              let buffer = latestFrame, let reference,
               let image = CameraSession.cgImage(from: buffer) else { return }
 
         let result = verifier.verify(candidate: image, against: reference)

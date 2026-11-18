@@ -237,4 +237,3 @@ struct MissionConfigurationFields: View {
 extension MissionCategory {
     static var ordered: [MissionCategory] { [.none, .mental, .visual, .physical, .location, .mixed] }
 }
-

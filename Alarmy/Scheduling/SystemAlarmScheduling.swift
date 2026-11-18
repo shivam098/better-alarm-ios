@@ -1,5 +1,6 @@
 import Foundation
 import AlarmyCore
+import CryptoKit
 
 /// What role a scheduled system alarm plays in the Mission Guard chain.
 public enum SystemAlarmRole: Hashable, Sendable {
@@ -63,14 +64,20 @@ public struct SystemAlarmRequest: Identifiable, Hashable, Sendable {
         self.isRepeating = isRepeating
     }
 
-    /// A stable UUIDv5-style identifier derived from the occurrence key.
-    ///
-    /// AlarmKit is keyed by `UUID`, but our idempotency key is a string. Hashing
-    /// the key into a deterministic UUID means "schedule this occurrence" is
-    /// naturally idempotent: a reboot, a sync merge or a reconciliation pass
-    /// produces the same UUID and therefore replaces the existing alarm instead
-    /// of adding a second one.
+    /// Full-key digest: nearby suffixes must not collapse to the same timer.
     public static func identifier(for occurrenceKey: String) -> UUID {
+        var bytes = Array(SHA256.hash(data: Data(occurrenceKey.utf8)).prefix(16))
+        // UUIDv8 reserves this layout for application-defined identifiers.
+        bytes[6] = (bytes[6] & 0x0F) | 0x80
+        bytes[8] = (bytes[8] & 0x3F) | 0x80
+        return UUID(uuid: (
+            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+            bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]
+        ))
+    }
+
+    /// Retained only to cancel timers created before the digest migration.
+    static func legacyIdentifier(for occurrenceKey: String) -> UUID {
         var bytes = [UInt8](repeating: 0, count: 16)
         // FNV-1a over the key, expanded to 16 bytes by re-hashing with a counter.
         for slot in 0..<16 {

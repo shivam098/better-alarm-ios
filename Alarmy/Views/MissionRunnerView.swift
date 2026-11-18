@@ -54,10 +54,11 @@ struct MissionRunnerView: View {
                         .buttonStyle(.borderedProminent)
                         .frame(maxHeight: .infinity)
                 } else if let step = currentStep {
+                    let completedStep = stepIndex
                     MissionStepView(
                         config: step,
                         challenges: challenges,
-                        onSolved: advance,
+                        onSolved: { advance(completedStep: completedStep) },
                         onFailed: { failure in
                             Task { await coordinator.failMission(reason: failure) }
                             if case .sensorUnavailable = failure { useFallback() }
@@ -133,6 +134,12 @@ struct MissionRunnerView: View {
 
     private var footer: some View {
         VStack(spacing: 10) {
+            if let message = coordinator.banner {
+                Text(message)
+                    .font(.footnote)
+                    .foregroundStyle(.orange)
+                    .multilineTextAlignment(.center)
+            }
             if let message = session.lastMessage {
                 Text(message)
                     .font(.footnote)
@@ -179,7 +186,8 @@ struct MissionRunnerView: View {
         stepIndex < steps.count ? (fallback ?? steps[stepIndex]) : nil
     }
 
-    private func advance() {
+    private func advance(completedStep: Int) {
+        guard completedStep == stepIndex, !session.missionSatisfied else { return }
         fallback = nil
         if stepIndex + 1 < steps.count {
             withAnimation { stepIndex += 1 }
@@ -310,10 +318,12 @@ struct MissionPreviewView: View {
                         description: Text("That's what you'll do at \(config.difficulty.displayName.lowercased()) difficulty.")
                     )
                 } else {
+                    let completedStep = index
                     MissionStepView(
                         config: fallback ?? steps[index],
                         challenges: challenges,
                         onSolved: {
+                            guard completedStep == index, !solved else { return }
                             fallback = nil
                             if index + 1 < steps.count { index += 1 } else { solved = true }
                         },

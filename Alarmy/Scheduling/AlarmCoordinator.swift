@@ -198,11 +198,15 @@ final class AlarmCoordinator: ObservableObject {
 
         let desiredKeys = Set((affordable + dynamic).map(\.occurrenceKey)).union(liveChainKeys)
 
-        let staleIDs = previousKeys.subtracting(desiredKeys).map(SystemAlarmRequest.identifier(for:))
-        await scheduler.cancel(ids: staleIDs)
-
+        let staleIDs = previousKeys.subtracting(desiredKeys).flatMap {
+            [SystemAlarmRequest.identifier(for: $0), SystemAlarmRequest.legacyIdentifier(for: $0)]
+        }
         do {
             try await scheduler.schedule(affordable + dynamic)
+            await scheduler.cancel(ids: staleIDs)
+            // Replace old timers before removing them: a failed migration must
+            // leave the previous system alarm available.
+            await scheduler.cancel(ids: Array(Set(previousKeys.map(SystemAlarmRequest.legacyIdentifier(for:)))))
             await store.setScheduledKeys(desiredKeys)
             if wishlist.count > affordable.count {
                 AlarmyLog.scheduling.notice(
@@ -225,7 +229,10 @@ final class AlarmCoordinator: ObservableObject {
 
     private func handleAlerting(systemID: UUID) async {
         let keys = await store.scheduledOccurrenceKeys()
-        guard let key = keys.first(where: { SystemAlarmRequest.identifier(for: $0) == systemID }) else {
+        guard let key = keys.first(where: {
+            SystemAlarmRequest.identifier(for: $0) == systemID
+                || SystemAlarmRequest.legacyIdentifier(for: $0) == systemID
+        }) else {
             return
         }
         await beginSession(occurrenceKey: key)
@@ -250,7 +257,7 @@ final class AlarmCoordinator: ObservableObject {
         await beginSession(occurrenceKey: occurrenceKey)
         guard var current = session, current.occurrenceKey == occurrenceKey else { return }
         if occurrenceKey.contains("#wake-") {
-            await scheduler.stopRinging(id: current.id)
+            await stopSystemAudio(for: current)
             current.state = .dismissedUnverified
             await store.updateOccurrence(key: occurrenceKey) {
                 $0.outcome = .dismissedUnverified
@@ -402,6 +409,7 @@ final class AlarmCoordinator: ObservableObject {
         if let current = session, current.rootKey == rootKey, current.state.isActive,
            occurrenceKey.contains("#wd") {
             await scheduler.stopRinging(id: SystemAlarmRequest.identifier(for: occurrenceKey))
+            await scheduler.stopRinging(id: SystemAlarmRequest.legacyIdentifier(for: occurrenceKey))
             return
         }
         let check = await store.allWakeChecks().first { $0.parentKey == rootKey }
@@ -473,7 +481,9 @@ final class AlarmCoordinator: ObservableObject {
                 // Only ever reached from `.missionCompleted`.
                 let keys = await store.keysInChain(parentKey: session.rootKey)
                     .filter { !$0.contains("#wake-") || session.occurrenceKey.contains("#wake-") }
-                await scheduler.cancel(ids: keys.map(SystemAlarmRequest.identifier(for:)))
+                await scheduler.cancel(ids: keys.flatMap {
+                    [SystemAlarmRequest.identifier(for: $0), SystemAlarmRequest.legacyIdentifier(for: $0)]
+                })
                 var remaining = await store.scheduledOccurrenceKeys()
                 remaining.subtract(keys)
                 await store.setScheduledKeys(remaining)
@@ -505,7 +515,7 @@ final class AlarmCoordinator: ObservableObject {
                 }
 
             case .stopAudio:
-                await scheduler.stopRinging(id: session.id)
+                await stopSystemAudio(for: session)
 
             case .markAudioSuppressed(let reason):
                 await store.updateOccurrence(key: session.occurrenceKey) { occurrence in
@@ -549,7 +559,9 @@ final class AlarmCoordinator: ObservableObject {
             }
             let oldKeys = await store.keysInChain(parentKey: session.rootKey)
                 .filter { !requests.map(\.occurrenceKey).contains($0) }
-            await scheduler.cancel(ids: oldKeys.map(SystemAlarmRequest.identifier(for:)))
+            await scheduler.cancel(ids: oldKeys.flatMap {
+                [SystemAlarmRequest.identifier(for: $0), SystemAlarmRequest.legacyIdentifier(for: $0)]
+            })
             var keys = await store.scheduledOccurrenceKeys()
             keys.subtract(oldKeys)
             keys.formUnion(requests.map(\.occurrenceKey))
@@ -561,6 +573,11 @@ final class AlarmCoordinator: ObservableObject {
             AlarmyLog.scheduling.error("Snooze scheduling failed: \(error.localizedDescription)")
             return false
         }
+    }
+
+    private func stopSystemAudio(for session: RingingSession) async {
+        await scheduler.stopRinging(id: session.id)
+        await scheduler.stopRinging(id: SystemAlarmRequest.legacyIdentifier(for: session.occurrenceKey))
     }
 
     // MARK: - Derived state
