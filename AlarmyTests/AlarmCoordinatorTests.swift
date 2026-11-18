@@ -80,6 +80,20 @@ final class AlarmCoordinatorTests: XCTestCase {
         XCTAssertEqual(Set(before.map(\.id)), Set(after.map(\.id)))
     }
 
+    func testPartiallyScheduledSnoozeIsRolledBackWithoutDroppingGuard() async {
+        let (coordinator, store, scheduler, key) = await fixture(Alarm())
+        let originalIDs = await scheduler.pendingIdentifiers()
+        await coordinator.handleStartMission(occurrenceKey: key)
+        await scheduler.setPartialFailure(true)
+        await coordinator.requestSnooze()
+        let remainingIDs = await scheduler.pendingIdentifiers()
+        let pending = await store.allSnoozes()
+        XCTAssertEqual(remainingIDs, originalIDs)
+        XCTAssertTrue(pending.isEmpty)
+        XCTAssertNotNil(coordinator.session)
+        XCTAssertNotNil(coordinator.banner)
+    }
+
     func testWakeCheckSurvivesHistoryClearAndStopAndCancelsOnlyOnConfirmation() async throws {
         let alarm = Alarm(wakeCheck: WakeCheckSettings(isEnabled: true))
         let (coordinator, store, scheduler, key) = await fixture(alarm)
@@ -209,7 +223,9 @@ final class AlarmCoordinatorTests: XCTestCase {
 private actor TestScheduler: SystemAlarmScheduling {
     private var requests: [UUID: SystemAlarmRequest] = [:]
     private var fails = false
+    private var failsAfterFirst = false
     func setFailure(_ value: Bool) { fails = value }
+    func setPartialFailure(_ value: Bool) { failsAfterFirst = value }
     func allRequests() -> [SystemAlarmRequest] { Array(requests.values) }
     func seedLegacy(_ request: SystemAlarmRequest) {
         requests = [SystemAlarmRequest.legacyIdentifier(for: request.occurrenceKey): request]
@@ -218,7 +234,10 @@ private actor TestScheduler: SystemAlarmScheduling {
     func requestAuthorization() async -> SystemAlarmAuthorization { .authorized }
     func schedule(_ values: [SystemAlarmRequest]) async throws {
         if fails { throw SystemAlarmError.schedulingFailed("Test failure") }
-        for request in values { requests[request.id] = request }
+        for request in values {
+            requests[request.id] = request
+            if failsAfterFirst { throw SystemAlarmError.schedulingFailed("Partial test failure") }
+        }
     }
     func cancel(ids: [UUID]) async { for id in ids { requests[id] = nil } }
     func stopRinging(id: UUID) async {}

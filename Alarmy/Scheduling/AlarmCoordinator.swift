@@ -548,15 +548,9 @@ final class AlarmCoordinator: ObservableObject {
 
         do {
             try await scheduler.schedule(requests)
-            do {
-                var pending = await store.allSnoozes().filter { $0.parentKey != session.rootKey }
-                pending.append(PendingSnooze(alarm: session.alarm, parentKey: session.rootKey, round: round, fireDate: fireDate))
-                try await store.setSnoozes(pending)
-            } catch {
-                await scheduler.cancel(ids: requests.map(\.id))
-                await scheduler.cancel(ids: requests.map(\.id))
-                throw error
-            }
+            var pending = await store.allSnoozes().filter { $0.parentKey != session.rootKey }
+            pending.append(PendingSnooze(alarm: session.alarm, parentKey: session.rootKey, round: round, fireDate: fireDate))
+            try await store.setSnoozes(pending)
             let oldKeys = await store.keysInChain(parentKey: session.rootKey)
                 .filter { !requests.map(\.occurrenceKey).contains($0) }
             await scheduler.cancel(ids: oldKeys.flatMap {
@@ -569,6 +563,7 @@ final class AlarmCoordinator: ObservableObject {
             banner = "Snoozed for \(minutes) minutes."
             return true
         } catch {
+            await scheduler.cancel(ids: requests.map(\.id))
             banner = "Snooze failed. Your alarm is still active; try again or finish the mission."
             AlarmyLog.scheduling.error("Snooze scheduling failed: \(error.localizedDescription)")
             return false
